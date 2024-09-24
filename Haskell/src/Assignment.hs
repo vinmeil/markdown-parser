@@ -39,10 +39,6 @@ data ADT = Empty |
 
 -- == HELPER FUNCTIONS == --
 
--- helper function to turn `char` result into string
--- its to avoid having type errors of expected [Char], actual Char
-charToString :: Parser String
-charToString = (:[]) <$> char
 
 -- checks result of parsing using string, might be reused in
 -- the future, so ill just put it in a function
@@ -53,17 +49,21 @@ checkString strs = Parser $ \input ->
     then Result input ""
     else Error UnexpectedEof
 
+
 parseUntil :: String -> Parser String
 parseUntil str = f
   where
     -- use recursion to concat letter by letter until it finds the string
-    f = checkString [str] <|> ((++) <$> charToString <*> f)
+    f = checkString [str] <|> ((:) <$> char <*> f)
+
 
 -- parses string until a specified string is found
 getStringBetween :: String -> Parser String
 getStringBetween str = string str *> parseUntil str <* string str
-    --          ^ base case
 
+
+checkModifierPrefix :: Parser String
+checkModifierPrefix = checkString ["_", "**", "~~"]
 
 -- == PARSERS == --
 
@@ -79,22 +79,14 @@ bold = Bold <$> getStringBetween "**"
 strikethrough :: Parser ADT
 strikethrough = Strikethrough <$> getStringBetween "~~"
 
--- plainText :: Parser ADT
--- plainText = PlainText <$> (parseUntil "_" <|> parseUntil "**" <|> parseUntil "~~")
-
--- plainText :: Parser ADT
--- plainText = PlainText <$> f
---   where
---     f = checkString ["_", "**", "~~"] $> "" <|> ((:) <$> char <*> f)
-
+-- parses string into plain text adt
 plainText :: Parser ADT
 plainText = PlainText <$> f
   where
     f = do
       c <- char
-      rest <- checkString ["_", "**", "~~"] <|> eof $> "" <|> f
+      rest <- checkModifierPrefix <|> eof $> "" <|> f
       return (c : rest)
-
 
 -- == MAIN PARSER == --
 
