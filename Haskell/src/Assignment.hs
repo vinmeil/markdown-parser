@@ -40,21 +40,12 @@ data ADT = Empty |
 -- == HELPER FUNCTIONS == --
 
 
--- checks result of parsing using string, might be reused in
--- the future, so ill just put it in a function
--- more like a boolean check if you ask me
-checkString :: [String] -> Parser String
-checkString strs = Parser $ \input ->
-  if any (`isPrefixOf` input) strs
-    then Result input ""
-    else Error UnexpectedEof
-
-
 parseUntil :: String -> Parser String
-parseUntil str = f
+parseUntil str = f (0 :: Int)
+  -- use recursion to concat letter by letter until it finds the string
   where
-    -- use recursion to concat letter by letter until it finds the string
-    f = checkString [str] <|> ((:) <$> char <*> f)
+    f 0 = (:) <$> char <*> f 1 -- make sure it has at least 1 letter before checking
+    f len = (isParserSucceed (string str) $> "") <|> ((:) <$> char <*> f (len + 1))
 
 
 -- parses string until a specified string is found
@@ -62,8 +53,15 @@ getStringBetween :: String -> Parser String
 getStringBetween str = string str *> parseUntil str <* string str
 
 
-checkModifierPrefix :: Parser String
-checkModifierPrefix = checkString ["_", "**", "~~"]
+-- checks if a parser returns an error or not without consuming input
+isParserSucceed :: Parser a -> Parser ()
+isParserSucceed (Parser p) = Parser $ \input ->
+  case p input of
+    Result _ _ -> Result input ()
+    Error _    -> Error UnexpectedEof
+
+
+
 
 -- == PARSERS == --
 
@@ -79,20 +77,24 @@ bold = Bold <$> getStringBetween "**"
 strikethrough :: Parser ADT
 strikethrough = Strikethrough <$> getStringBetween "~~"
 
+-- parses text into adt
+parseModifiers :: Parser ADT
+parseModifiers = italic <|> bold <|> strikethrough
+
+
 -- parses string into plain text adt
 plainText :: Parser ADT
 plainText = PlainText <$> f
   where
-    f = do
-      c <- char
-      rest <- checkModifierPrefix <|> eof $> "" <|> f
-      return (c : rest)
+    f = (:) <$> char <*> ((isParserSucceed parseModifiers $> "") <|> eof $> "" <|> f)
+
+    -- f = do
+    --   c <- char -- consume first character because we know it failed modifiers
+    --   rest <- (isParserSucceed parseModifiers $> "") <|> eof $> "" <|> f
+    --   return (c : rest)
+
 
 -- == MAIN PARSER == --
-
--- parses text into adt
-parseModifiers :: Parser ADT
-parseModifiers = italic <|> bold <|> strikethrough
 
 parseText :: Parser [ADT]
 parseText = many (parseModifiers <|> plainText)
