@@ -37,7 +37,8 @@ data ADT = Empty |
   Strikethrough String |
   Link (String, String) |
   Code String |
-  Footnote Int
+  Footnote Int |
+  Image (String, String, String)
   -- Footnote String
   deriving (Show, Eq)
 
@@ -48,24 +49,22 @@ parseUntil :: String -> Parser String
 parseUntil str = f (0 :: Int)
   -- use recursion to concat letter by letter until it finds the string
   where
-    f 0 = (:) <$> char <*> f 1 -- make sure it has at least 1 letter before checking
+    f 0 = (:) <$> char <*> f 1 -- ensure has at least 1 letter before checking
     f len = (isParserSucceed (string str) $> "") <|> ((:) <$> char <*> f (len + 1))
-    -- f = (isParserSucceed (string str) *> char *> f) <|> f' <|> (eof $> "") -- make sure it has at least 1 letter before checking
-    -- f' = (string str $> "") <|> ((:) <$> char <*> f')
+
+
+parseUntilInlineSpace :: Parser String
+parseUntilInlineSpace = f
+  where
+    f = do
+      whitespace <- inlineSpace
+      if not (null whitespace) then pure ""
+        else do (:) <$> char <*> f
 
 
 -- parses string until a specified string is found
 getStringBetween :: String -> String -> Parser String
 getStringBetween st1 st2 = string st1 *> parseUntil st2 <* string st2
--- getStringBetween st1 st2 = string st1 *> parseUntil st2
--- getStringBetween st1 st2 = f
---   where
---     f = (isParserSucceed (string st1) *>
---         isParserSucceed (char *> string st1) $> "" <|> string st1 *> f') *>
---         (char *> f)
---     f' = (string st2 $> "") <|> ((:) <$> char <*> f')
-
-
 
 
 -- checks if a parser returns an error or not without consuming input
@@ -111,11 +110,24 @@ footnote = do
   spacesBefore <- inlineSpace
   guard (null spacesBefore) <|> unexpectedStringParser "Expected no spaces"
   num <- int
+  guard (num > 0) <|> unexpectedStringParser "Expected positive integer"
   spacesAfter <- inlineSpace
   guard (null spacesAfter) <|> unexpectedStringParser "Expected no spaces"
   _ <- string "]"
   return $ Footnote num
-    
+
+-- parses string into image adt
+image :: Parser ADT
+image = do
+  _ <- string "!"
+  text <- getStringBetween "[" "]"
+  _ <- inlineSpace *> string "("
+  url <- parseUntilInlineSpace
+  caption <- getStringBetween "\"" "\""
+  _ <- string ")"
+  return $ Image (text, url, caption)
+
+
 
 -- parses text into adt
 parseModifiers :: Parser ADT
@@ -128,11 +140,8 @@ plainText = PlainText <$> f
   where
     f = do
       c <- char -- consume first character because we know it failed modifiers
-      --            v recursive base case v
       rest <- (isParserSucceed parseModifiers $> "") <|> eof $> "" <|> f
       return (c : rest)
-
-    -- f = (:) <$> char <*> ((isParserSucceed parseModifiers $> "") <|> eof $> "" <|> f)
 
 
 -- == MAIN PARSER == --
