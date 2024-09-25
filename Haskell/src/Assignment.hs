@@ -8,7 +8,7 @@ import           Parser
 
 import           Control.Applicative
 import           Data.Functor     (($>))
-import Data.List (isPrefixOf)
+import Control.Monad (guard)
 
 
 -- BNF
@@ -34,7 +34,11 @@ data ADT = Empty |
   PlainText String |
   Italic String |
   Bold String |
-  Strikethrough String
+  Strikethrough String |
+  Link (String, String) |
+  Code String |
+  Footnote Int
+  -- Footnote String
   deriving (Show, Eq)
 
 -- == HELPER FUNCTIONS == --
@@ -46,11 +50,22 @@ parseUntil str = f (0 :: Int)
   where
     f 0 = (:) <$> char <*> f 1 -- make sure it has at least 1 letter before checking
     f len = (isParserSucceed (string str) $> "") <|> ((:) <$> char <*> f (len + 1))
+    -- f = (isParserSucceed (string str) *> char *> f) <|> f' <|> (eof $> "") -- make sure it has at least 1 letter before checking
+    -- f' = (string str $> "") <|> ((:) <$> char <*> f')
 
 
 -- parses string until a specified string is found
-getStringBetween :: String -> Parser String
-getStringBetween str = string str *> parseUntil str <* string str
+getStringBetween :: String -> String -> Parser String
+getStringBetween st1 st2 = string st1 *> parseUntil st2 <* string st2
+-- getStringBetween st1 st2 = string st1 *> parseUntil st2
+-- getStringBetween st1 st2 = f
+--   where
+--     f = (isParserSucceed (string st1) *>
+--         isParserSucceed (char *> string st1) $> "" <|> string st1 *> f') *>
+--         (char *> f)
+--     f' = (string st2 $> "") <|> ((:) <$> char <*> f')
+
+
 
 
 -- checks if a parser returns an error or not without consuming input
@@ -67,31 +82,57 @@ isParserSucceed (Parser p) = Parser $ \input ->
 
 -- parses string into italic adt
 italic :: Parser ADT
-italic = Italic <$> getStringBetween "_"
+italic = Italic <$> getStringBetween "_" "_"
 
 -- parses string into bold adt
 bold :: Parser ADT
-bold = Bold <$> getStringBetween "**"
+bold = Bold <$> getStringBetween "**" "**"
 
 -- parses string into strikethrough adt
 strikethrough :: Parser ADT
-strikethrough = Strikethrough <$> getStringBetween "~~"
+strikethrough = Strikethrough <$> getStringBetween "~~" "~~"
+
+-- parses string into link adt
+link :: Parser ADT
+link = do
+  text <- getStringBetween "[" "]"
+  _ <- inlineSpace
+  url <- getStringBetween "(" ")"
+  return $ Link (text, url)
+
+-- parses string into code adt
+code :: Parser ADT
+code = Code <$> getStringBetween "`" "`"
+
+-- parses string into footnote adt
+footnote :: Parser ADT
+footnote = do
+  _ <- string "[^"
+  spacesBefore <- inlineSpace
+  guard (null spacesBefore) <|> unexpectedStringParser "Expected no spaces"
+  num <- int
+  spacesAfter <- inlineSpace
+  guard (null spacesAfter) <|> unexpectedStringParser "Expected no spaces"
+  _ <- string "]"
+  return $ Footnote num
+    
 
 -- parses text into adt
 parseModifiers :: Parser ADT
-parseModifiers = italic <|> bold <|> strikethrough
+parseModifiers = italic <|> bold <|> strikethrough <|> link <|> code <|> footnote
 
 
 -- parses string into plain text adt
 plainText :: Parser ADT
 plainText = PlainText <$> f
   where
-    f = (:) <$> char <*> ((isParserSucceed parseModifiers $> "") <|> eof $> "" <|> f)
+    f = do
+      c <- char -- consume first character because we know it failed modifiers
+      --            v recursive base case v
+      rest <- (isParserSucceed parseModifiers $> "") <|> eof $> "" <|> f
+      return (c : rest)
 
-    -- f = do
-    --   c <- char -- consume first character because we know it failed modifiers
-    --   rest <- (isParserSucceed parseModifiers $> "") <|> eof $> "" <|> f
-    --   return (c : rest)
+    -- f = (:) <$> char <*> ((isParserSucceed parseModifiers $> "") <|> eof $> "" <|> f)
 
 
 -- == MAIN PARSER == --

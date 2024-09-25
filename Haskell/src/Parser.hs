@@ -29,6 +29,11 @@ failed = Parser . const . Error
 unexpectedCharParser :: Char -> Parser a
 unexpectedCharParser = Parser . const . Error . UnexpectedChar
 
+-- | Produces a parser that always fails with 'UnexpectedString' using the given
+-- string.
+unexpectedStringParser :: String -> Parser a
+unexpectedStringParser = Parser . const . Error . UnexpectedString
+
 -- | Return a parser that succeeds with a character off the input or fails with
 -- an error if the input is empty.
 --
