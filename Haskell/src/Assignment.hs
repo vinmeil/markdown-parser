@@ -1,15 +1,12 @@
 module Assignment (markdownParser, convertADTHTML) where
 
-
-import           Data.Time.Clock  (getCurrentTime)
-import           Data.Time.Format (defaultTimeLocale, formatTime)
-import           Instances        (Parser (..), ParseError (..), ParseResult (..))
-import           Parser
-
-import           Control.Applicative
-import           Data.Functor     (($>))
+import Control.Applicative
 import Control.Monad (guard)
-
+import Data.Functor (($>))
+import Data.Time.Clock (getCurrentTime)
+import Data.Time.Format (defaultTimeLocale, formatTime)
+import Instances (ParseError (..), ParseResult (..), Parser (..))
+import Parser
 
 -- BNF
 -- <Number>        ::= '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9'
@@ -29,67 +26,94 @@ import Control.Monad (guard)
 --
 --
 
-data ADT = Empty |
-  -- Your ADT **must** derive Show.
-  PlainText String |
-  Italic String |
-  Bold String |
-  Strikethrough String |
-  Link (String, String) |
-  Code String |
-  Footnote Int |
-  Image (String, String, String) |
-  FootnoteRef (Int, String) |
-  Heading (Int, ADT)
+data ADT
+  = Empty
+  | -- Your ADT **must** derive Show.
+    JustText String
+  | Newline Char
+  | Paragraph String
+  | Italic String
+  | Bold String
+  | Strikethrough String
+  | Link (String, String)
+  | Code String
+  | Footnote Int
+  | Image (String, String, String)
+  | FootnoteRef (Int, String)
+  | Heading (Int, ADT)
   -- Footnote String
   deriving (Show, Eq)
 
 -- == HELPER FUNCTIONS == --
 
+flipTuple :: (a, b) -> (b, a)
+flipTuple (a, b) = (b, a)
 
 parseUntil :: String -> Parser String
 parseUntil str = f (0 :: Int)
-  -- use recursion to concat letter by letter until it finds the string
   where
+    -- use recursion to concat letter by letter until it finds the string
+
     f 0 = (:) <$> char <*> f 1 -- ensure has at least 1 letter before checking
     f len = (isParserSucceed (string str) $> "") <|> ((:) <$> char <*> f (len + 1))
 
+parseUntilNotChar :: Char -> Parser String
+parseUntilNotChar chr = some (is chr)
+
+-- should return an error if theres more
+parseAtMost :: Int -> Char -> Parser String
+parseAtMost lim ch = do
+  str <- some (is ch)
+  guard (length str <= lim) <|> unexpectedStringParser "Parsed too many characters"
+  return str
+
+parseAtLeast :: Int -> Char -> Parser String
+parseAtLeast lim ch = do
+  str <- some (is ch)
+  guard (length str >= lim) <|> unexpectedStringParser "Not enough characters"
+  return str
+
+parseUntilEof :: Parser String
+parseUntilEof = many char
 
 parseUntilInlineSpace :: Parser String
 parseUntilInlineSpace = f
   where
     f = do
       whitespace <- inlineSpace
-      if not (null whitespace) then pure ""
+      if not (null whitespace)
+        then pure ""
         else do (:) <$> char <*> f
-
 
 parseUntilNewline :: Parser String
 parseUntilNewline = parseUntil "\n"
 
-
 -- parses string until a specified string is found
 getStringBetween :: String -> String -> Parser String
 getStringBetween st1 st2 = string st1 *> parseUntil st2 <* string st2
-
 
 -- checks if a parser returns an error or not without consuming input
 isParserSucceed :: Parser a -> Parser ()
 isParserSucceed (Parser p) = Parser $ \input ->
   case p input of
     Result _ _ -> Result input ()
-    Error _    -> Error UnexpectedEof
-
+    Error _ -> Error UnexpectedEof
 
 -- checks if theres a newline and removes whitespaces after
 checkNewlineAndRemoveSpace :: Parser String
 checkNewlineAndRemoveSpace = string "\n" *> inlineSpace
 
-
-
-
 -- == PARSERS == --
 
+-- my own parsers --
+
+newline :: Parser ADT
+newline = Newline <$> is '\n'
+
+justText :: Parser ADT
+justText = JustText <$> (parseUntilNewline <|> parseUntilEof)
+
+--------------------
 -- parses string into italic adt
 italic :: Parser ADT
 italic = Italic <$> getStringBetween "_" "_"
@@ -104,11 +128,12 @@ strikethrough = Strikethrough <$> getStringBetween "~~" "~~"
 
 -- parses string into link adt
 link :: Parser ADT
-link = do
-  text <- getStringBetween "[" "]"
-  _ <- inlineSpace
-  url <- getStringBetween "(" ")"
-  return $ Link (text, url)
+link =
+  Link
+    <$> ( (,)
+            <$> (getStringBetween "[" "]" <* inlineSpace)
+            <*> getStringBetween "(" ")"
+        )
 
 -- parses string into code adt
 code :: Parser ADT
@@ -119,11 +144,10 @@ getFootnoteNumber :: Parser Int
 getFootnoteNumber = do
   _ <- string "[^"
   spacesBefore <- inlineSpace
-  guard (null spacesBefore) <|> unexpectedStringParser "Expected no spaces"
   num <- int
-  guard (num > 0) <|> unexpectedStringParser "Expected positive integer"
   spacesAfter <- inlineSpace
-  guard (null spacesAfter) <|> unexpectedStringParser "Expected no spaces"
+  guard (null spacesAfter && (num > 0) && null spacesBefore)
+    <|> unexpectedStringParser "Expected no spaces and positive integer"
   _ <- string "]"
   return num
 
@@ -131,48 +155,51 @@ getFootnoteNumber = do
 footnote :: Parser ADT
 footnote = Footnote <$> getFootnoteNumber
 
+-- NON MODIFIER PARSERS
+
 -- parses string into image adt
 image :: Parser ADT
-image = do
-  _ <- string "!"
-  text <- getStringBetween "[" "]"
-  _ <- inlineSpace *> string "("
-  url <- parseUntilInlineSpace
-  caption <- getStringBetween "\"" "\""
-  _ <- string ")"
-  return $ Image (text, url, caption)
+image =
+  Image
+    <$> ( (,,)
+            <$> getStringBetween "![" "]"
+            <* inlineSpace
+            <*> (string "(" *> parseUntilInlineSpace)
+            <*> (getStringBetween "\"" "\"" <* string ")")
+        )
 
 -- parses string into footnote reference adt
 footnoteRef :: Parser ADT
-footnoteRef = do
-  _ <- checkNewlineAndRemoveSpace
-  num <- getFootnoteNumber
-  _ <- string ":" *> inlineSpace -- remove spaces after ":"
-  text <- parseUntilNewline <* string "\n" -- remove newline character
-  return $ FootnoteRef (num, text)
+footnoteRef =
+  FootnoteRef
+    <$> ( (,)
+            <$> ( getFootnoteNumber
+                    <* string ":"
+                    <* inlineSpace
+                )
+            <*> parseUntilNewline
+            <* is '\n'
+        )
 
 -- parses string into heading adt
 headingHashtag :: Parser ADT
-headingHashtag = do
-  _ <- checkNewlineAndRemoveSpace
-  len <- length <$> some (is '#')
-  guard (len <= 6) <|> unexpectedStringParser "Expected only 1-6 hashtags"
-  _ <- inlineSpace1
-  text <- parseModifiers <|> PlainText <$> parseUntilNewline
-  return $ Heading (len, text)
+headingHashtag =
+  Heading
+    <$> ( (,)
+            <$> (length <$> parseAtMost 6 '#')
+            <*> (parseModifiers <|> justText)
+        )
 
 -- helper function to parse alternative headings
 altHeading :: Int -> Char -> Parser ADT
-altHeading n c = do
-  _ <- checkNewlineAndRemoveSpace
-  text <- parseModifiers <|> PlainText <$> parseUntilNewline <* string "\n"
-  _ <- inlineSpace
-  _ <- checkNewlineAndRemoveSpace
-  len <- length <$> some (is c)
-  guard (len >= 2) <|> unexpectedStringParser "Expected at least 2 heading characters"
-  _ <- inlineSpace
-  _ <- is '\n' <|> unexpectedStringParser "Expected newline character"
-  return $ Heading (n, text)
+altHeading n c =
+  Heading
+    <$> ( flipTuple
+            <$> ( (,)
+                    <$> ((parseModifiers <* is '\n') <|> justText)
+                    <*> (parseAtLeast 2 c $> n)
+                )
+        )
 
 altHeading1 :: Parser ADT
 altHeading1 = altHeading 1 '='
@@ -183,38 +210,42 @@ altHeading2 = altHeading 2 '-'
 heading :: Parser ADT
 heading = headingHashtag <|> altHeading1 <|> altHeading2
 
-
 -- parses text into adt
 parseModifiers :: Parser ADT
-parseModifiers = heading <|>
-                 italic <|>
-                 bold <|>
-                 strikethrough <|>
-                 link <|>
-                 code <|>
-                 footnoteRef <|>
-                 footnote <|>
-                 image
+parseModifiers =
+  italic
+    <|> bold
+    <|> strikethrough
+    <|> link
+    <|> code
+    <|> footnote
 
-
--- parses string into plain text adt
-plainText :: Parser ADT
-plainText = PlainText <$> f
+-- parses string into paragraph adt
+paragraph :: Parser ADT
+paragraph = Paragraph <$> f
   where
     f = do
       c <- char -- consume first character because we know it failed modifiers
-      rest <- (isParserSucceed parseModifiers $> "") <|> eof $> "" <|> f
+      rest <-
+        (isParserSucceed (parseModifiers <|> newline) $> "")
+          <|> eof $> ""
+          <|> f
       return (c : rest)
 
+parseNonModifiers :: Parser ADT
+parseNonModifiers =
+  inlineSpace
+    *> ( footnoteRef
+           <|> image
+           <|> heading
+       )
 
 -- == MAIN PARSER == --
 
 parseText :: Parser [ADT]
 parseText = do
   _ <- allSpace
-  _ <- addNewline
-  many (parseModifiers <|> plainText)
-
+  many (newline <|> parseNonModifiers <|> parseModifiers <|> paragraph)
 
 markdownParser :: Parser ADT
 markdownParser = pure Empty
