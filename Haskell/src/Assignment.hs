@@ -36,11 +36,12 @@ data ADT
   | Bold String
   | Strikethrough String
   | Link (String, String)
-  | Code String
+  | InlineCode String
   | Footnote Int
   | Image (String, String, String)
   | FootnoteRef (Int, String)
   | Heading (Int, ADT)
+  | Blockquote [ADT]
   -- Footnote String
   deriving (Show, Eq)
 
@@ -135,9 +136,9 @@ link =
             <*> getStringBetween "(" ")"
         )
 
--- parses string into code adt
-code :: Parser ADT
-code = Code <$> getStringBetween "`" "`"
+-- parses string into inlinecode adt
+inlinecode :: Parser ADT
+inlinecode = InlineCode <$> getStringBetween "`" "`"
 
 -- gets the number inside of a footnote
 getFootnoteNumber :: Parser Int
@@ -196,7 +197,8 @@ altHeading n c =
   Heading
     <$> ( flipTuple
             <$> ( (,)
-                    <$> ((parseModifiers <* is '\n') <|> justText)
+                    <$> (parseModifiers <|> justText)
+                    <* is '\n'
                     <*> (parseAtLeast 2 c $> n)
                 )
         )
@@ -210,6 +212,16 @@ altHeading2 = altHeading 2 '-'
 heading :: Parser ADT
 heading = headingHashtag <|> altHeading1 <|> altHeading2
 
+-- parses string into blockquote adt
+blockquote :: Parser ADT
+blockquote =
+  Blockquote
+    <$> some
+      ( inlineSpace
+          *> charTok '>'
+          *> (paragraph <* optional (is '\n'))
+      )
+
 -- parses text into adt
 parseModifiers :: Parser ADT
 parseModifiers =
@@ -217,7 +229,7 @@ parseModifiers =
     <|> bold
     <|> strikethrough
     <|> link
-    <|> code
+    <|> inlinecode
     <|> footnote
 
 -- parses string into paragraph adt
@@ -238,6 +250,7 @@ parseNonModifiers =
     *> ( footnoteRef
            <|> image
            <|> heading
+           <|> blockquote
        )
 
 -- == MAIN PARSER == --
@@ -245,7 +258,8 @@ parseNonModifiers =
 parseText :: Parser [ADT]
 parseText = do
   _ <- allSpace
-  many (newline <|> parseNonModifiers <|> parseModifiers <|> paragraph)
+  many
+    (newline <|> parseNonModifiers <|> parseModifiers <|> paragraph)
 
 markdownParser :: Parser ADT
 markdownParser = pure Empty
