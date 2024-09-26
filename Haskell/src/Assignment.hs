@@ -38,7 +38,8 @@ data ADT = Empty |
   Link (String, String) |
   Code String |
   Footnote Int |
-  Image (String, String, String)
+  Image (String, String, String) |
+  FootnoteRef (Int, String)
   -- Footnote String
   deriving (Show, Eq)
 
@@ -60,6 +61,10 @@ parseUntilInlineSpace = f
       whitespace <- inlineSpace
       if not (null whitespace) then pure ""
         else do (:) <$> char <*> f
+
+
+parseUntilNewline :: Parser String
+parseUntilNewline = parseUntil "\n"
 
 
 -- parses string until a specified string is found
@@ -103,9 +108,9 @@ link = do
 code :: Parser ADT
 code = Code <$> getStringBetween "`" "`"
 
--- parses string into footnote adt
-footnote :: Parser ADT
-footnote = do
+-- gets the number inside of a footnote
+getFootnoteNumber :: Parser Int
+getFootnoteNumber = do
   _ <- string "[^"
   spacesBefore <- inlineSpace
   guard (null spacesBefore) <|> unexpectedStringParser "Expected no spaces"
@@ -114,7 +119,11 @@ footnote = do
   spacesAfter <- inlineSpace
   guard (null spacesAfter) <|> unexpectedStringParser "Expected no spaces"
   _ <- string "]"
-  return $ Footnote num
+  return num
+
+-- parses string into footnote adt
+footnote :: Parser ADT
+footnote = Footnote <$> getFootnoteNumber
 
 -- parses string into image adt
 image :: Parser ADT
@@ -127,11 +136,27 @@ image = do
   _ <- string ")"
   return $ Image (text, url, caption)
 
+-- parses string into footnote reference adt
+footnoteRef :: Parser ADT
+footnoteRef = do
+  _ <- inlineSpace -- remove leading spaces
+  num <- getFootnoteNumber
+  _ <- string ":" *> inlineSpace -- remove spaces after ":"
+  text <- parseUntilNewline <* string "\n" -- remove newline character
+  return $ FootnoteRef (num, text)
+
 
 
 -- parses text into adt
 parseModifiers :: Parser ADT
-parseModifiers = italic <|> bold <|> strikethrough <|> link <|> code <|> footnote
+parseModifiers = italic <|>
+                 bold <|>
+                 strikethrough <|>
+                 link <|>
+                 code <|>
+                 footnoteRef <|>
+                 footnote <|>
+                 image
 
 
 -- parses string into plain text adt
@@ -147,7 +172,12 @@ plainText = PlainText <$> f
 -- == MAIN PARSER == --
 
 parseText :: Parser [ADT]
-parseText = many (parseModifiers <|> plainText)
+parseText = do
+  _ <- optional inlineSpace
+  parsedTexts <- many (parseModifiers <|> plainText)
+  _ <- optional inlineSpace
+  _ <- optional (string "\n")
+  return parsedTexts
 
 
 markdownParser :: Parser ADT
