@@ -1,8 +1,10 @@
 module Assignment (markdownParser, convertADTHTML) where
 
 import Control.Applicative
+import Control.Exception (try)
 import Control.Monad (guard)
 import Data.Functor (($>))
+import Data.List
 import Data.Time.Clock (getCurrentTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import Instances (ParseError (..), ParseResult (..), Parser (..))
@@ -40,12 +42,18 @@ data ADT
   | Footnote Int
   | Image (String, String, String)
   | FootnoteRef (Int, String)
-  | Heading (Int, ADT)
-  | Blockquote [ADT]
+  | Heading (Int, [ADT])
+  | Blockquote [[ADT]]
   -- Footnote String
   deriving (Show, Eq)
 
+modifierPrefixes :: [String]
+modifierPrefixes = ["_", "**", "~~", "[", "`", "[^", "![", "\n", ">"]
+
 -- == HELPER FUNCTIONS == --
+
+startsWith :: String -> Parser ()
+startsWith str = isParserSucceed (string str)
 
 flipTuple :: (a, b) -> (b, a)
 flipTuple (a, b) = (b, a)
@@ -61,6 +69,24 @@ parseUntil str = f (0 :: Int)
 parseUntilNotChar :: Char -> Parser String
 parseUntilNotChar chr = some (is chr)
 
+parseUntilModifier :: Parser String
+parseUntilModifier = f
+  where
+    f = do
+      c <- char -- consume first character because we know it failed modifiers
+      rest <-
+        (asum (map startsWith modifierPrefixes) $> "")
+          <|> eof $> ""
+          <|> f
+      return (c : rest)
+
+-- c <- char -- consume first character because we know it failed modifiers
+-- rest <-
+--   (isParserSucceed (parseNonModifiers <|> parseModifiers <|> newline) $> "")
+--     <|> eof $> ""
+--     <|> f
+-- return (c : rest)
+
 -- should return an error if theres more
 parseAtMost :: Int -> Char -> Parser String
 parseAtMost lim ch = do
@@ -75,7 +101,7 @@ parseAtLeast lim ch = do
   return str
 
 parseUntilEof :: Parser String
-parseUntilEof = many char
+parseUntilEof = some char
 
 parseUntilInlineSpace :: Parser String
 parseUntilInlineSpace = f
@@ -100,9 +126,12 @@ isParserSucceed (Parser p) = Parser $ \input ->
     Result _ _ -> Result input ()
     Error _ -> Error UnexpectedEof
 
--- checks if theres a newline and removes whitespaces after
-checkNewlineAndRemoveSpace :: Parser String
-checkNewlineAndRemoveSpace = string "\n" *> inlineSpace
+parseModifierAndTextUntilNewline :: Parser [ADT]
+parseModifierAndTextUntilNewline =
+  some
+    ( parseModifiers
+        <|> (isParserSucceed (isNot '\n') *> justText)
+    )
 
 -- == PARSERS == --
 
@@ -112,7 +141,7 @@ newline :: Parser ADT
 newline = Newline <$> is '\n'
 
 justText :: Parser ADT
-justText = JustText <$> (parseUntilNewline <|> parseUntilEof)
+justText = JustText <$> (parseUntilModifier <|> parseUntilNewline <|> parseUntilEof)
 
 --------------------
 -- parses string into italic adt
@@ -187,8 +216,8 @@ headingHashtag :: Parser ADT
 headingHashtag =
   Heading
     <$> ( (,)
-            <$> (length <$> parseAtMost 6 '#')
-            <*> (parseModifiers <|> justText)
+            <$> (length <$> parseAtMost 6 '#' <* inlineSpace1)
+            <*> parseModifierAndTextUntilNewline
         )
 
 -- helper function to parse alternative headings
@@ -197,7 +226,7 @@ altHeading n c =
   Heading
     <$> ( flipTuple
             <$> ( (,)
-                    <$> (parseModifiers <|> justText)
+                    <$> parseModifierAndTextUntilNewline
                     <* is '\n'
                     <*> (parseAtLeast 2 c $> n)
                 )
@@ -219,7 +248,8 @@ blockquote =
     <$> some
       ( inlineSpace
           *> charTok '>'
-          *> (paragraph <* optional (is '\n'))
+          *> parseModifierAndTextUntilNewline
+          <* optional newline
       )
 
 -- parses text into adt
@@ -234,15 +264,7 @@ parseModifiers =
 
 -- parses string into paragraph adt
 paragraph :: Parser ADT
-paragraph = Paragraph <$> f
-  where
-    f = do
-      c <- char -- consume first character because we know it failed modifiers
-      rest <-
-        (isParserSucceed (parseModifiers <|> newline) $> "")
-          <|> eof $> ""
-          <|> f
-      return (c : rest)
+paragraph = Paragraph <$> parseUntilModifier
 
 parseNonModifiers :: Parser ADT
 parseNonModifiers =
