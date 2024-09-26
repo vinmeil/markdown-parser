@@ -40,7 +40,7 @@ data ADT = Empty |
   Footnote Int |
   Image (String, String, String) |
   FootnoteRef (Int, String) |
-  Heading (Int, String)
+  Heading (Int, ADT)
   -- Footnote String
   deriving (Show, Eq)
 
@@ -79,6 +79,11 @@ isParserSucceed (Parser p) = Parser $ \input ->
   case p input of
     Result _ _ -> Result input ()
     Error _    -> Error UnexpectedEof
+
+
+-- checks if theres a newline and removes whitespaces after
+checkNewlineAndRemoveSpace :: Parser String
+checkNewlineAndRemoveSpace = string "\n" *> inlineSpace
 
 
 
@@ -140,7 +145,7 @@ image = do
 -- parses string into footnote reference adt
 footnoteRef :: Parser ADT
 footnoteRef = do
-  _ <- inlineSpace -- remove leading spaces
+  _ <- checkNewlineAndRemoveSpace
   num <- getFootnoteNumber
   _ <- string ":" *> inlineSpace -- remove spaces after ":"
   text <- parseUntilNewline <* string "\n" -- remove newline character
@@ -149,18 +154,40 @@ footnoteRef = do
 -- parses string into heading adt
 headingHashtag :: Parser ADT
 headingHashtag = do
-  _ <- inlineSpace
+  _ <- checkNewlineAndRemoveSpace
   len <- length <$> some (is '#')
   guard (len <= 6) <|> unexpectedStringParser "Expected only 1-6 hashtags"
-  _ <- inlineSpace
-  text <- parseUntilNewline <* string "\n"
+  _ <- inlineSpace1
+  text <- parseModifiers <|> PlainText <$> parseUntilNewline
   return $ Heading (len, text)
 
+-- helper function to parse alternative headings
+altHeading :: Int -> Char -> Parser ADT
+altHeading n c = do
+  _ <- checkNewlineAndRemoveSpace
+  text <- parseModifiers <|> PlainText <$> parseUntilNewline <* string "\n"
+  _ <- inlineSpace
+  _ <- checkNewlineAndRemoveSpace
+  len <- length <$> some (is c)
+  guard (len >= 2) <|> unexpectedStringParser "Expected at least 2 heading characters"
+  _ <- inlineSpace
+  _ <- is '\n' <|> unexpectedStringParser "Expected newline character"
+  return $ Heading (n, text)
+
+altHeading1 :: Parser ADT
+altHeading1 = altHeading 1 '='
+
+altHeading2 :: Parser ADT
+altHeading2 = altHeading 2 '-'
+
+heading :: Parser ADT
+heading = headingHashtag <|> altHeading1 <|> altHeading2
 
 
 -- parses text into adt
 parseModifiers :: Parser ADT
-parseModifiers = italic <|>
+parseModifiers = heading <|>
+                 italic <|>
                  bold <|>
                  strikethrough <|>
                  link <|>
@@ -184,11 +211,9 @@ plainText = PlainText <$> f
 
 parseText :: Parser [ADT]
 parseText = do
-  _ <- optional inlineSpace
-  parsedTexts <- many (parseModifiers <|> plainText)
-  _ <- optional inlineSpace
-  _ <- optional (string "\n")
-  return parsedTexts
+  _ <- allSpace
+  _ <- addNewline
+  many (parseModifiers <|> plainText)
 
 
 markdownParser :: Parser ADT

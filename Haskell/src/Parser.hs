@@ -254,6 +254,12 @@ spaces1 = some space
 inlineSpace :: Parser String
 inlineSpace = many (oneof "\t\r\f\v ")
 
+inlineSpace1 :: Parser String
+inlineSpace1 = some (oneof "\t\r\f\v ")
+
+allSpace :: Parser String
+allSpace = many (oneof "\t\r\f\v \n")
+
 -- | Write a function that parses the given string (fails otherwise).
 --
 -- /Hint/: Use 'is' and 'traverse'.
@@ -324,3 +330,9 @@ commaTok = charTok ','
 -- True
 stringTok :: String -> Parser String
 stringTok = tok . string
+
+
+addNewline :: Parser String
+addNewline = Parser f
+  where
+    f str = Result ("\n" ++ str) ""
