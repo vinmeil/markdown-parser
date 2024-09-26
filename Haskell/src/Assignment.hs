@@ -44,6 +44,7 @@ data ADT
   | FootnoteRef (Int, String)
   | Heading (Int, [ADT])
   | Blockquote [[ADT]]
+  | Code (String, String)
   -- Footnote String
   deriving (Show, Eq)
 
@@ -252,6 +253,16 @@ blockquote =
           <* optional newline
       )
 
+code :: Parser ADT
+code =
+  Code
+    <$> ( (,)
+            <$> getStringBetween "```" "\n"
+            <*> ( (parseUntil "```\n" <* string "```\n")
+                    <|> (parseUntil "\n```" <* string "\n```" <* eof)
+                )
+        )
+
 -- parses text into adt
 parseModifiers :: Parser ADT
 parseModifiers =
@@ -273,6 +284,7 @@ parseNonModifiers =
            <|> image
            <|> heading
            <|> blockquote
+           <|> code
        )
 
 -- == MAIN PARSER == --
