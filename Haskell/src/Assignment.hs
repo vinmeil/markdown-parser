@@ -39,7 +39,8 @@ data ADT = Empty |
   Code String |
   Footnote Int |
   Image (String, String, String) |
-  FootnoteRef (Int, String)
+  FootnoteRef (Int, String) |
+  Heading (Int, String)
   -- Footnote String
   deriving (Show, Eq)
 
@@ -144,6 +145,16 @@ footnoteRef = do
   _ <- string ":" *> inlineSpace -- remove spaces after ":"
   text <- parseUntilNewline <* string "\n" -- remove newline character
   return $ FootnoteRef (num, text)
+
+-- parses string into heading adt
+headingHashtag :: Parser ADT
+headingHashtag = do
+  _ <- inlineSpace
+  len <- length <$> some (is '#')
+  guard (len <= 6) <|> unexpectedStringParser "Expected only 1-6 hashtags"
+  _ <- inlineSpace
+  text <- parseUntilNewline <* string "\n"
+  return $ Heading (len, text)
 
 
 
