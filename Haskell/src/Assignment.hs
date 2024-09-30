@@ -7,6 +7,7 @@ import Data.Functor (($>))
 import Data.List
 import Data.Time.Clock (getCurrentTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
+import Debug.Trace (trace)
 import Instances (ParseError (..), ParseResult (..), Parser (..))
 import Parser
 
@@ -45,6 +46,7 @@ data ADT
   | Heading (Int, [ADT])
   | Blockquote [[ADT]]
   | Code (String, String)
+  | OrderedList [(Int, [ADT])]
   -- Footnote String
   deriving (Show, Eq)
 
@@ -253,15 +255,30 @@ blockquote =
           <* optional newline
       )
 
+-- Helper function for code block to recursively parse until closing code block
+parseUntilClosingCode :: Parser String
+parseUntilClosingCode =
+  (parseUntil "```\n" <* string "```\n")
+    <|> (parseUntil "\n```" <* string "\n```" <* eof)
+    <|> ((:) <$> char <*> parseUntilClosingCode)
+
+-- parses string into code block adt
 code :: Parser ADT
 code =
   Code
     <$> ( (,)
-            <$> getStringBetween "```" "\n"
-            <*> ( (parseUntil "```\n" <* string "```\n")
-                    <|> (parseUntil "\n```" <* string "\n```" <* eof)
-                )
+            <$> (string "```\n" $> "" <|> getStringBetween "```" "\n")
+            <*> parseUntilClosingCode
         )
+
+-- parses string into ordered list ADT
+-- orderedList :: Parser ADT
+-- orderedList = do
+--   -- parse "1. "
+--   -- parse all text inside list item until '\n'
+--   -- after new line, check if theres k * 4 spaces then parse another "1. "
+--   -- repeate until no space, check if string starts with "{int}. ""
+--   _ <- string "1. " *< inlineSpace
 
 -- parses text into adt
 parseModifiers :: Parser ADT
