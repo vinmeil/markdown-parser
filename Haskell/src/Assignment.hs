@@ -283,31 +283,43 @@ guardIndentation indent = do
   guard (whitespace == indent)
     <|> unexpectedStringParser "Unexpected number of spaces"
 
-parseListItem :: Int -> String -> Parser (Int, [ADT])
-parseListItem 1 indent = do
+parseListItemAux :: String -> Parser a2 -> Parser (a2, [ADT])
+parseListItemAux indent parser = do
   guardIndentation indent
-  -- whitespace <- inlineSpace
-  -- guard (whitespace == indent)
-  --   <|> unexpectedStringParser "Unexpected number of spaces"
-  _ <- string "1. " <* inlineSpace
+  num <- parser
   text <- parseModifierAndTextUntilNewline <* optional (is '\n')
   subList <- parseSublist (indent ++ "    ") <|> pure Empty
-  -- trace ("sublist: " ++ show subList) $ return (1, text ++ [subList])
-  let tupleSnd = text ++ [subList]
-  return (1, tupleSnd)
-parseListItem _ indent = do
-  guardIndentation indent
-  -- whitespace <- inlineSpace
-  -- guard (whitespace == indent)
-  --   <|> unexpectedStringParser "Unexpected number of spaces"
-  num <- int
-  _ <- string ". " <* inlineSpace
-  text <- parseModifierAndTextUntilNewline <* optional (is '\n')
-  subList <- parseSublist (indent ++ "    ") <|> pure Empty
+  -- concats the sublist to the list of items in the ordered list item
   let tupleSnd = text ++ [subList]
   return (num, tupleSnd)
 
--- return (num, text)
+parseListItem :: Int -> String -> Parser (Int, [ADT])
+parseListItem 1 indent = parseListItemAux indent ((string "1. " <* inlineSpace) $> 1)
+parseListItem _ indent = parseListItemAux indent (positiveInt <* string ". " <* inlineSpace)
+
+-- parseListItem :: Int -> String -> Parser (Int, [ADT])
+-- parseListItem 1 indent = do
+--   -- make sure indentation is same
+--   guardIndentation indent
+--   -- parse "1. " since it is first list item
+--   _ <- string "1. " <* inlineSpace
+--   -- parse text then check if it has a sublist
+--   text <- parseModifierAndTextUntilNewline <* optional (is '\n')
+--   subList <- parseSublist (indent ++ "    ") <|> pure Empty
+--   -- concats the sublist to the list of items in the ordered list item
+--   let tupleSnd = text ++ [subList]
+--   return (1, tupleSnd)
+-- parseListItem _ indent = do
+--   -- make sure indentation is same
+--   guardIndentation indent
+--   -- parse "x. " by calling positiveInt and string ". " to remove int and ". "
+--   num <- positiveInt <* string ". " <* inlineSpace
+--   -- parse text then check if it has a sublist
+--   text <- parseModifierAndTextUntilNewline <* optional (is '\n')
+--   subList <- parseSublist (indent ++ "    ") <|> pure Empty
+--   -- concats the sublist to the list of items in the ordered list item
+--   let tupleSnd = text ++ [subList]
+--   return (num, tupleSnd)
 
 orderedList :: Parser ADT
 orderedList = do
@@ -320,8 +332,8 @@ orderedList = do
 parseSublist :: String -> Parser ADT
 parseSublist indent = do
   li1 <- parseListItem 1 indent
-  rest <- trace ("parsed list item 1: " ++ show li1) many (parseListItem 0 indent)
-  trace ("parsed rest of sublist: " ++ show rest) return $ OrderedList (li1 : rest)
+  rest <- many (parseListItem 0 indent)
+  return $ OrderedList (li1 : rest)
 
 -- parses text into adt
 parseModifiers :: Parser ADT
@@ -332,6 +344,7 @@ parseModifiers =
     <|> link
     <|> inlinecode
     <|> footnote
+    <|> orderedList
 
 -- parses string into paragraph adt
 paragraph :: Parser ADT
