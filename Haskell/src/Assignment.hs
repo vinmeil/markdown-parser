@@ -47,11 +47,14 @@ data ADT
   | Blockquote [[ADT]]
   | Code (String, String)
   | OrderedList [(Int, [ADT])]
+  | Table [[ADT]]
+  | TableHeader [[ADT]]
+  | TableRow [[ADT]]
   -- Footnote String
   deriving (Show, Eq)
 
 modifierPrefixes :: [String]
-modifierPrefixes = ["_", "**", "~~", "[", "`", "[^", "![", "\n", ">"]
+modifierPrefixes = ["_", "**", "~~", "[", "`", "[^", "![", "\n", ">", "|"]
 
 -- == HELPER FUNCTIONS == --
 
@@ -88,13 +91,6 @@ parseUntilModifier = f
           <|> eof $> ""
           <|> f
       return (c : rest)
-
--- c <- char -- consume first character because we know it failed modifiers
--- rest <-
---   (isParserSucceed (parseNonModifiers <|> parseModifiers <|> newline) $> "")
---     <|> eof $> ""
---     <|> f
--- return (c : rest)
 
 -- should return an error if theres more
 parseAtMost :: Int -> Char -> Parser String
@@ -139,7 +135,20 @@ parseModifierAndTextUntilNewline :: Parser [ADT]
 parseModifierAndTextUntilNewline =
   some
     ( parseModifiers
-        <|> (isParserSucceed (isNot '\n') *> justText)
+        <|> trace "got here" (isParserSucceed (isNot '\n') *> justText)
+    )
+
+parseModifierAndTextUntil :: Char -> Parser [ADT]
+parseModifierAndTextUntil delim =
+  some
+    ( parseModifiers
+        <|> ( isParserSucceed (isNot delim)
+                *> ( JustText
+                       <$> ( parseUntilModifier
+                               <|> parseUntil [delim]
+                           )
+                   )
+            )
     )
 
 -- == PARSERS == --
@@ -277,63 +286,67 @@ code =
             <*> parseUntilClosingCode
         )
 
+-- helper function for ordered list to check for proper indentation
 guardIndentation :: String -> Parser ()
 guardIndentation indent = do
   whitespace <- inlineSpace
   guard (whitespace == indent)
     <|> unexpectedStringParser "Unexpected number of spaces"
 
-parseListItemAux :: String -> Parser a2 -> Parser (a2, [ADT])
+-- helper function for ordered list to parse a line of an ordered list
+parseListItemAux :: String -> Parser a -> Parser (a, [ADT])
 parseListItemAux indent parser = do
-  guardIndentation indent
-  num <- parser
-  text <- parseModifierAndTextUntilNewline <* optional (is '\n')
+  guardIndentation indent -- checks for correct indentation
+  num <- parser -- gets the number at the front
+  -- parses text and checks if theres a sublist
+  textADTs <- parseModifierAndTextUntilNewline <* optional (is '\n')
   subList <- parseSublist (indent ++ "    ") <|> pure Empty
-  -- concats the sublist to the list of items in the ordered list item
-  let tupleSnd = text ++ [subList]
+  let tupleSnd = textADTs ++ [subList] -- concats the sublist to the list
   return (num, tupleSnd)
 
+-- helper function for ordered list to parse list items which calls an aux function
 parseListItem :: Int -> String -> Parser (Int, [ADT])
 parseListItem 1 indent = parseListItemAux indent ((string "1. " <* inlineSpace) $> 1)
 parseListItem _ indent = parseListItemAux indent (positiveInt <* string ". " <* inlineSpace)
 
--- parseListItem :: Int -> String -> Parser (Int, [ADT])
--- parseListItem 1 indent = do
---   -- make sure indentation is same
---   guardIndentation indent
---   -- parse "1. " since it is first list item
---   _ <- string "1. " <* inlineSpace
---   -- parse text then check if it has a sublist
---   text <- parseModifierAndTextUntilNewline <* optional (is '\n')
---   subList <- parseSublist (indent ++ "    ") <|> pure Empty
---   -- concats the sublist to the list of items in the ordered list item
---   let tupleSnd = text ++ [subList]
---   return (1, tupleSnd)
--- parseListItem _ indent = do
---   -- make sure indentation is same
---   guardIndentation indent
---   -- parse "x. " by calling positiveInt and string ". " to remove int and ". "
---   num <- positiveInt <* string ". " <* inlineSpace
---   -- parse text then check if it has a sublist
---   text <- parseModifierAndTextUntilNewline <* optional (is '\n')
---   subList <- parseSublist (indent ++ "    ") <|> pure Empty
---   -- concats the sublist to the list of items in the ordered list item
---   let tupleSnd = text ++ [subList]
---   return (num, tupleSnd)
-
-orderedList :: Parser ADT
-orderedList = do
-  -- make sure list starts with "1. "
-  firstItem <- parseListItem 1 ""
-  -- parse the rest of the list items
-  rest <- many (parseListItem 0 "")
-  return $ OrderedList (firstItem : rest)
-
+-- parses sublist
 parseSublist :: String -> Parser ADT
-parseSublist indent = do
-  li1 <- parseListItem 1 indent
-  rest <- many (parseListItem 0 indent)
-  return $ OrderedList (li1 : rest)
+parseSublist indent =
+  OrderedList
+    <$> ( (:)
+            <$> parseListItem 1 indent
+            <*> many (parseListItem 0 indent)
+        )
+
+-- parses string into orderedlist ADT
+orderedList :: Parser ADT
+orderedList =
+  OrderedList
+    <$> ( (:)
+            <$> parseListItem 1 ""
+            <*> many (parseListItem 0 "")
+        )
+
+-- parses string into table adt
+table :: Parser ADT
+table = do
+  header <- parseHeader
+  _ <- parseRow -- removes the separating line
+  rows <- some parseRow
+  return (Table ([header] : [rows]))
+
+parseHeader :: Parser ADT
+parseHeader = TableHeader <$> parseTableRow
+
+parseRow :: Parser ADT
+parseRow = TableRow <$> parseTableRow
+
+parseTableRow :: Parser [[ADT]]
+parseTableRow =
+  charTok '|'
+    *> parseModifierAndTextUntil '|' `sepBy1` charTok '|'
+    <* charTok '|'
+    <* optional (is '\n')
 
 -- parses text into adt
 parseModifiers :: Parser ADT
@@ -344,7 +357,6 @@ parseModifiers =
     <|> link
     <|> inlinecode
     <|> footnote
-    <|> orderedList
 
 -- parses string into paragraph adt
 paragraph :: Parser ADT
@@ -358,6 +370,7 @@ parseNonModifiers =
            <|> heading
            <|> blockquote
            <|> code
+           <|> orderedList
        )
 
 -- == MAIN PARSER == --

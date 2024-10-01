@@ -337,3 +337,10 @@ commaTok = charTok ','
 -- True
 stringTok :: String -> Parser String
 stringTok = tok . string
+
+sepBy1 :: Parser a -> Parser b -> Parser [a]
+sepBy1 pa pb = pa <:> many (pb *> pa)
+  where
+    -- (Optional) cons the results of two parsers
+    (<:>) :: Parser a -> Parser [a] -> Parser [a]
+    (<:>) = liftA2 (:)
