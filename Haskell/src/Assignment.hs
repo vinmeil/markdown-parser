@@ -55,6 +55,12 @@ modifierPrefixes = ["_", "**", "~~", "[", "`", "[^", "![", "\n", ">"]
 
 -- == HELPER FUNCTIONS == --
 
+positiveInt :: Parser Int
+positiveInt = do
+  num <- int
+  guard (num > 0) <|> unexpectedStringParser "Expected positive integer"
+  return num
+
 startsWith :: String -> Parser ()
 startsWith str = isParserSucceed (string str)
 
@@ -177,9 +183,9 @@ getFootnoteNumber :: Parser Int
 getFootnoteNumber = do
   _ <- string "[^"
   spacesBefore <- inlineSpace
-  num <- int
+  num <- positiveInt
   spacesAfter <- inlineSpace
-  guard (null spacesAfter && (num > 0) && null spacesBefore)
+  guard (null spacesAfter && null spacesBefore)
     <|> unexpectedStringParser "Expected no spaces and positive integer"
   _ <- string "]"
   return num
@@ -271,14 +277,51 @@ code =
             <*> parseUntilClosingCode
         )
 
--- parses string into ordered list ADT
--- orderedList :: Parser ADT
--- orderedList = do
---   -- parse "1. "
---   -- parse all text inside list item until '\n'
---   -- after new line, check if theres k * 4 spaces then parse another "1. "
---   -- repeate until no space, check if string starts with "{int}. ""
---   _ <- string "1. " *< inlineSpace
+guardIndentation :: String -> Parser ()
+guardIndentation indent = do
+  whitespace <- inlineSpace
+  guard (whitespace == indent)
+    <|> unexpectedStringParser "Unexpected number of spaces"
+
+parseListItem :: Int -> String -> Parser (Int, [ADT])
+parseListItem 1 indent = do
+  guardIndentation indent
+  -- whitespace <- inlineSpace
+  -- guard (whitespace == indent)
+  --   <|> unexpectedStringParser "Unexpected number of spaces"
+  _ <- string "1. " <* inlineSpace
+  text <- parseModifierAndTextUntilNewline <* optional (is '\n')
+  subList <- parseSublist (indent ++ "    ") <|> pure Empty
+  -- trace ("sublist: " ++ show subList) $ return (1, text ++ [subList])
+  let tupleSnd = text ++ [subList]
+  return (1, tupleSnd)
+parseListItem _ indent = do
+  guardIndentation indent
+  -- whitespace <- inlineSpace
+  -- guard (whitespace == indent)
+  --   <|> unexpectedStringParser "Unexpected number of spaces"
+  num <- int
+  _ <- string ". " <* inlineSpace
+  text <- parseModifierAndTextUntilNewline <* optional (is '\n')
+  subList <- parseSublist (indent ++ "    ") <|> pure Empty
+  let tupleSnd = text ++ [subList]
+  return (num, tupleSnd)
+
+-- return (num, text)
+
+orderedList :: Parser ADT
+orderedList = do
+  -- make sure list starts with "1. "
+  firstItem <- parseListItem 1 ""
+  -- parse the rest of the list items
+  rest <- many (parseListItem 0 "")
+  return $ OrderedList (firstItem : rest)
+
+parseSublist :: String -> Parser ADT
+parseSublist indent = do
+  li1 <- parseListItem 1 indent
+  rest <- trace ("parsed list item 1: " ++ show li1) many (parseListItem 0 indent)
+  trace ("parsed rest of sublist: " ++ show rest) return $ OrderedList (li1 : rest)
 
 -- parses text into adt
 parseModifiers :: Parser ADT
