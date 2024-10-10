@@ -303,9 +303,18 @@ validateDashes = all isValidDashCell
 table :: Parser ADT
 table = do
   header <- parseHeader
-  dashes <- parseRow -- removes the separating line
+  _ <- parseSeparator -- removes the separating line
   rows <- some parseRow
   return (Table ([header] : [rows]))
+
+-- parses table header separator
+parseSeparator :: Parser ()
+parseSeparator = do
+  _ <- charTok '|'
+  _ <- (parseAtLeast 3 '-' <* inlineSpace) `sepBy1` charTok '|'
+  _ <- optional (is '|')
+  _ <- optional (is '\n')
+  return ()
 
 parseHeader :: Parser ADT
 parseHeader = TableHeader <$> parseTableRow
@@ -317,6 +326,7 @@ parseTableRow :: Parser [ADT]
 parseTableRow =
   charTok '|'
     *> parseTableCell `sepBy1` charTok '|'
+    <* optional (is '|')
     <* optional (is '\n')
 
 parseTableCell :: Parser ADT
