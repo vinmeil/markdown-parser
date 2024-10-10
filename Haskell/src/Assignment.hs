@@ -229,51 +229,83 @@ footnote = Footnote <$> getFootnoteNumber
 -- NON MODIFIER PARSERS
 
 -- parses string into image adt
+-- image :: Parser ADT
+-- image =
+--   Image
+--     <$> ( (,,)
+--             <$> getStringBetween "![" "]"
+--             <* inlineSpace
+--             <*> (string "(" *> parseUntilInlineSpace)
+--             <*> (getStringBetween "\"" "\"" <* string ")")
+--         )
+
 image :: Parser ADT
-image =
-  Image
-    <$> ( (,,)
-            <$> getStringBetween "![" "]"
-            <* inlineSpace
-            <*> (string "(" *> parseUntilInlineSpace)
-            <*> (getStringBetween "\"" "\"" <* string ")")
-        )
+image = do
+  alt <- getStringBetween "![" "]"
+  _ <- inlineSpace
+  url <- string "(" *> parseUntilInlineSpace
+  caption <- getStringBetween "\"" "\"" <* string ")"
+  return $ Image (alt, url, caption)
 
 -- parses string into footnote reference adt
+-- footnoteRef :: Parser ADT
+-- footnoteRef =
+--   FootnoteRef
+--     <$> ( inlineSpace
+--             *> ( (,)
+--                    <$> ( getFootnoteNumber
+--                            <* string ":"
+--                            <* inlineSpace
+--                        )
+--                    <*> parseUntilNewline
+--                    <* is '\n'
+--                )
+--         )
+
 footnoteRef :: Parser ADT
-footnoteRef =
-  FootnoteRef
-    <$> ( inlineSpace
-            *> ( (,)
-                   <$> ( getFootnoteNumber
-                           <* string ":"
-                           <* inlineSpace
-                       )
-                   <*> parseUntilNewline
-                   <* is '\n'
-               )
-        )
+footnoteRef = do
+  _ <- inlineSpace
+  num <- getFootnoteNumber <* string ":" <* inlineSpace
+  content <- (parseUntilNewline <|> parseUntilEof) <* optional (is '\n')
+  return $ FootnoteRef (num, content)
 
 -- parses string into heading adt
+-- headingHashtag :: Parser ADT
+-- headingHashtag =
+--   Heading
+--     <$> ( (,)
+--             <$> (length <$> parseAtMost 6 '#' <* inlineSpace1)
+--             <*> parseModifierAndTextUntilNewline
+--         )
+
 headingHashtag :: Parser ADT
-headingHashtag =
-  Heading
-    <$> ( (,)
-            <$> (length <$> parseAtMost 6 '#' <* inlineSpace1)
-            <*> parseModifierAndTextUntilNewline
-        )
+headingHashtag = do
+  level <- length <$> parseAtMost 6 '#' <* inlineSpace1
+  content <- parseModifierAndTextUntilNewline
+  return $ Heading (level, content)
 
 -- helper function to parse alternative headings
+-- altHeading :: Int -> Char -> Parser ADT
+-- altHeading n c =
+--   Heading
+--     <$> ( flipTuple
+--             <$> ( (,)
+--                     <$> parseModifierAndTextUntilNewline
+--                     <* is '\n'
+--                     <*> (parseAtLeast 2 c $> n)
+--                 )
+--         )
+
 altHeading :: Int -> Char -> Parser ADT
-altHeading n c =
-  Heading
-    <$> ( flipTuple
-            <$> ( (,)
-                    <$> parseModifierAndTextUntilNewline
-                    <* is '\n'
-                    <*> (parseAtLeast 2 c $> n)
-                )
-        )
+altHeading n c = do
+  content <- parseModifierAndTextUntilNewline <* is '\n'
+  _ <-
+    parseAtLeast 2 c
+      -- remove spaces and \n or eof after dashes, if it fails then theres
+      -- another character so it fails the parser
+      <* inlineSpace
+      <* ((is '\n' <|> (eof $> ' ')) <|> unexpectedStringParser "Unexpected characters after heading")
+  return $ Heading (n, content)
 
 altHeading1 :: Parser ADT
 altHeading1 = altHeading 1 '='
@@ -285,15 +317,25 @@ heading :: Parser ADT
 heading = inlineSpace *> (headingHashtag <|> altHeading1 <|> altHeading2)
 
 -- parses string into blockquote adt
+-- blockquote :: Parser ADT
+-- blockquote =
+--   Blockquote
+--     <$> some
+--       ( inlineSpace
+--           *> charTok '>'
+--           *> parseModifierAndTextUntilNewline
+--           <* optional newline
+--       )
+
 blockquote :: Parser ADT
-blockquote =
-  Blockquote
-    <$> some
-      ( inlineSpace
-          *> charTok '>'
-          *> parseModifierAndTextUntilNewline
-          <* optional newline
-      )
+blockquote = do
+  quotes <- some $ do
+    _ <- inlineSpace
+    _ <- charTok '>'
+    adts <- parseModifierAndTextUntilNewline
+    _ <- optional newline
+    return adts
+  return $ Blockquote quotes
 
 -- Helper function for code block to recursively parse until closing code block
 parseUntilClosingCode :: Parser String
@@ -303,13 +345,19 @@ parseUntilClosingCode =
     <|> ((:) <$> char <*> parseUntilClosingCode)
 
 -- parses string into code block adt
+-- code :: Parser ADT
+-- code =
+--   Code
+--     <$> ( (,)
+--             <$> (string "```\n" $> "" <|> getStringBetween "```" "\n")
+--             <*> parseUntilClosingCode
+--         )
+
 code :: Parser ADT
-code =
-  Code
-    <$> ( (,)
-            <$> (string "```\n" $> "" <|> getStringBetween "```" "\n")
-            <*> parseUntilClosingCode
-        )
+code = do
+  opening <- string "```\n" $> "" <|> getStringBetween "```" "\n"
+  content <- parseUntilClosingCode
+  return $ Code (opening, content)
 
 -- helper function for ordered list to check for proper indentation
 guardIndentation :: String -> Parser ()
@@ -322,12 +370,10 @@ guardIndentation indent = do
 -- helper function for ordered list to parse a line of an ordered list
 parseListItemAux :: String -> Parser a -> Parser (a, [ADT])
 parseListItemAux indent parser = do
-  guardIndentation indent
+  _ <- guardIndentation indent
   num <- parser -- gets the number at the front
   -- parses text and checks if theres a sublist
-  textADTs <-
-    parseModifierAndTextUntilNewline
-      <* optional (is '\n')
+  textADTs <- parseModifierAndTextUntilNewline <* optional (is '\n')
   subList <- parseSublist (indent ++ "    ") <|> pure Empty
   let tupleSnd = textADTs ++ [subList] -- concats the sublist to the list
   return (num, tupleSnd)
@@ -338,22 +384,33 @@ parseListItem 1 indent = parseListItemAux indent ((string "1. " <* inlineSpace) 
 parseListItem _ indent = parseListItemAux indent (positiveInt <* string ". " <* inlineSpace)
 
 -- parses sublist
+-- parseSublist :: String -> Parser ADT
+-- parseSublist indent =
+--   OrderedList
+--     <$> ( (:)
+--             <$> parseListItem 1 indent
+--             <*> many (parseListItem 0 indent)
+--         )
 parseSublist :: String -> Parser ADT
-parseSublist indent =
-  OrderedList
-    <$> ( (:)
-            <$> parseListItem 1 indent
-            <*> many (parseListItem 0 indent)
-        )
+parseSublist indent = do
+  firstItem <- parseListItem 1 indent
+  rest <- many (parseListItem 0 indent)
+  return $ OrderedList (firstItem : rest)
 
 -- parses string into orderedlist ADT
+-- orderedList :: Parser ADT
+-- orderedList =
+--   OrderedList
+--     <$> ( (:)
+--             <$> parseListItem 1 ""
+--             <*> many (parseListItem 0 "")
+--         )
+
 orderedList :: Parser ADT
-orderedList =
-  OrderedList
-    <$> ( (:)
-            <$> parseListItem 1 ""
-            <*> many (parseListItem 0 "")
-        )
+orderedList = do
+  firstItem <- parseListItem 1 ""
+  rest <- many (parseListItem 0 "")
+  return $ OrderedList (firstItem : rest)
 
 -- parses string into table adt
 validateDashes :: [ADT] -> Bool
@@ -379,27 +436,15 @@ parseTableRow :: Parser [ADT]
 parseTableRow =
   charTok '|'
     *> parseTableCell `sepBy1` charTok '|'
-    <* trace "got into here one" optional (is '\n')
-
--- parseTableCell :: Parser ADT
--- parseTableCell =
---   TableCell
---     <$> ( fmap trimADT
---             <$> some
---               ( isParserSucceed (isNot '|')
---                   *> ( parseModifiers
---                          <|> JustText
---                            <$> (parseUntilModifier <|> parseUntil "|")
---                      )
---               )
---         )
+    <* optional (is '\n')
 
 parseTableCell :: Parser ADT
 parseTableCell = do
-  cells <- some $ do
+  adts <- some $ do
+    -- get a list of adts
     _ <- isParserSucceed (isNot '|')
     parseModifiers <|> (JustText <$> (parseUntilModifier <|> parseUntil "|"))
-  return $ TableCell (fmap trimADT cells)
+  return $ TableCell (fmap trimADT adts)
 
 ----------------------------------------------------------------------
 -- got this function from github copilot, did not make this on my own.
