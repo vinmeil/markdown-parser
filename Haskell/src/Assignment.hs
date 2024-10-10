@@ -59,7 +59,6 @@ data ADT
   deriving (Show, Eq)
 
 modifierPrefixes :: [String]
--- modifierPrefixes = ["_", "**", "~~", "[", "`", "[^", "![", "\n", ">"]
 modifierPrefixes = ["|", "_", "**", "~~", "[", "`", "[^", "![", "\n", ">"]
 
 -- == HELPER FUNCTIONS == --
@@ -84,9 +83,6 @@ parseUntil str = f (0 :: Int)
     f 0 = (:) <$> char <*> f 1 -- ensure has at least 1 letter before checking
     f len = (isParserSucceed (string str) $> "") <|> ((:) <$> char <*> f (len + 1))
 
-parseUntilNotChar :: Char -> Parser String
-parseUntilNotChar chr = some (is chr)
-
 parseUntilModifier :: Parser String
 parseUntilModifier = f
   where
@@ -105,6 +101,7 @@ parseAtMost lim ch = do
   guard (length str <= lim) <|> unexpectedStringParser "Parsed too many characters"
   return str
 
+-- returns an error if theres less
 parseAtLeast :: Int -> Char -> Parser String
 parseAtLeast lim ch = do
   str <- some (is ch)
@@ -144,36 +141,6 @@ parseModifierAndTextUntilNewline =
         <|> (isParserSucceed (isNot '\n') *> justText)
     )
 
-parseModifierAndTextUntil :: Char -> Parser [ADT]
-parseModifierAndTextUntil delim =
-  some
-    ( parseModifiers
-        <|> ( isParserSucceed (isNot delim)
-                *> ( JustText
-                       <$> ( parseUntilModifier
-                               <|> parseUntilNewline
-                               <|> parseUntilEof
-                               <|> parseUntil [delim]
-                           )
-                   )
-            )
-    )
-
--- parseUntilSpacesAndDelim :: String -> Parser String
--- parseUntilSpacesAndDelim delim = f
---   where
---     f = (isParserSucceed (inlineSpace *> string delim) *> (inlineSpace *> string delim $> "")) <|> ((:) <$> char <*> f)
-
-parseUntilSpacesAndDelim :: String -> Parser String
-parseUntilSpacesAndDelim delim = f
-  where
-    f = (isParserSucceed (inlineSpace *> string delim) *> trace "removing space and delim" (inlineSpace $> "")) <|> ((:) <$> trace "getting next char" char <*> f)
-
-fun :: String -> Parser String
-fun delim = f
-  where
-    f = (isParserSucceed (inlineSpace *> string delim) *> (inlineSpace *> string delim $> "")) <|> ((:) <$> char <*> f)
-
 -- == PARSERS == --
 
 -- my own parsers --
@@ -199,12 +166,10 @@ strikethrough = Strikethrough <$> getStringBetween "~~" "~~"
 
 -- parses string into link adt
 link :: Parser ADT
-link =
-  Link
-    <$> ( (,)
-            <$> (getStringBetween "[" "]" <* inlineSpace)
-            <*> getStringBetween "(" ")"
-        )
+link = do
+  text <- getStringBetween "[" "]" <* inlineSpace
+  url <- getStringBetween "(" ")"
+  return $ Link (text, url)
 
 -- parses string into inlinecode adt
 inlinecode :: Parser ADT
@@ -228,17 +193,6 @@ footnote = Footnote <$> getFootnoteNumber
 
 -- NON MODIFIER PARSERS
 
--- parses string into image adt
--- image :: Parser ADT
--- image =
---   Image
---     <$> ( (,,)
---             <$> getStringBetween "![" "]"
---             <* inlineSpace
---             <*> (string "(" *> parseUntilInlineSpace)
---             <*> (getStringBetween "\"" "\"" <* string ")")
---         )
-
 image :: Parser ADT
 image = do
   alt <- getStringBetween "![" "]"
@@ -247,21 +201,6 @@ image = do
   caption <- getStringBetween "\"" "\"" <* string ")"
   return $ Image (alt, url, caption)
 
--- parses string into footnote reference adt
--- footnoteRef :: Parser ADT
--- footnoteRef =
---   FootnoteRef
---     <$> ( inlineSpace
---             *> ( (,)
---                    <$> ( getFootnoteNumber
---                            <* string ":"
---                            <* inlineSpace
---                        )
---                    <*> parseUntilNewline
---                    <* is '\n'
---                )
---         )
-
 footnoteRef :: Parser ADT
 footnoteRef = do
   _ <- inlineSpace
@@ -269,32 +208,11 @@ footnoteRef = do
   content <- (parseUntilNewline <|> parseUntilEof) <* optional (is '\n')
   return $ FootnoteRef (num, content)
 
--- parses string into heading adt
--- headingHashtag :: Parser ADT
--- headingHashtag =
---   Heading
---     <$> ( (,)
---             <$> (length <$> parseAtMost 6 '#' <* inlineSpace1)
---             <*> parseModifierAndTextUntilNewline
---         )
-
 headingHashtag :: Parser ADT
 headingHashtag = do
   level <- length <$> parseAtMost 6 '#' <* inlineSpace1
   content <- parseModifierAndTextUntilNewline
   return $ Heading (level, content)
-
--- helper function to parse alternative headings
--- altHeading :: Int -> Char -> Parser ADT
--- altHeading n c =
---   Heading
---     <$> ( flipTuple
---             <$> ( (,)
---                     <$> parseModifierAndTextUntilNewline
---                     <* is '\n'
---                     <*> (parseAtLeast 2 c $> n)
---                 )
---         )
 
 altHeading :: Int -> Char -> Parser ADT
 altHeading n c = do
@@ -316,17 +234,6 @@ altHeading2 = altHeading 2 '-'
 heading :: Parser ADT
 heading = inlineSpace *> (headingHashtag <|> altHeading1 <|> altHeading2)
 
--- parses string into blockquote adt
--- blockquote :: Parser ADT
--- blockquote =
---   Blockquote
---     <$> some
---       ( inlineSpace
---           *> charTok '>'
---           *> parseModifierAndTextUntilNewline
---           <* optional newline
---       )
-
 blockquote :: Parser ADT
 blockquote = do
   quotes <- some $ do
@@ -343,15 +250,6 @@ parseUntilClosingCode =
   (parseUntil "```\n" <* string "```\n")
     <|> (parseUntil "\n```" <* string "\n```" <* eof)
     <|> ((:) <$> char <*> parseUntilClosingCode)
-
--- parses string into code block adt
--- code :: Parser ADT
--- code =
---   Code
---     <$> ( (,)
---             <$> (string "```\n" $> "" <|> getStringBetween "```" "\n")
---             <*> parseUntilClosingCode
---         )
 
 code :: Parser ADT
 code = do
@@ -383,28 +281,11 @@ parseListItem :: Int -> String -> Parser (Int, [ADT])
 parseListItem 1 indent = parseListItemAux indent ((string "1. " <* inlineSpace) $> 1)
 parseListItem _ indent = parseListItemAux indent (positiveInt <* string ". " <* inlineSpace)
 
--- parses sublist
--- parseSublist :: String -> Parser ADT
--- parseSublist indent =
---   OrderedList
---     <$> ( (:)
---             <$> parseListItem 1 indent
---             <*> many (parseListItem 0 indent)
---         )
 parseSublist :: String -> Parser ADT
 parseSublist indent = do
   firstItem <- parseListItem 1 indent
   rest <- many (parseListItem 0 indent)
   return $ OrderedList (firstItem : rest)
-
--- parses string into orderedlist ADT
--- orderedList :: Parser ADT
--- orderedList =
---   OrderedList
---     <$> ( (:)
---             <$> parseListItem 1 ""
---             <*> many (parseListItem 0 "")
---         )
 
 orderedList :: Parser ADT
 orderedList = do
