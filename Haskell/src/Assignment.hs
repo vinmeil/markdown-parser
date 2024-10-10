@@ -3,6 +3,7 @@ module Assignment (markdownParser, convertADTHTML) where
 import Control.Applicative
 import Control.Exception (try)
 import Control.Monad (guard)
+import Data.Char (toUpper)
 import Data.Functor (($>))
 import Data.List
 import Data.Time.Clock (getCurrentTime)
@@ -14,7 +15,7 @@ import Parser
 -- BNF
 -- <Number>        ::= '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9'
 -- <Char>          ::= any character honestly
--- <Text>          ::= <Char> | <Char> <Text>
+-- <Text>          ::= <AnyChar> | <AnyChar> <Text>
 -- <URL>           ::= <Text>
 -- <Italic>        ::= '_' <Text> '_'
 -- <Bold>          ::= '**' <Text> '**'
@@ -47,14 +48,19 @@ data ADT
   | Blockquote [[ADT]]
   | Code (String, String)
   | OrderedList [(Int, [ADT])]
-  | Table [[ADT]]
-  | TableHeader [[ADT]]
-  | TableRow [[ADT]]
+  | -- | Table [ADT]
+    Table [[ADT]]
+  | -- | TableHeader [ADT]
+    TableHeader [ADT]
+  | -- | TableRow [ADT]
+    TableRow [ADT]
+  | TableCell [ADT]
   -- Footnote String
   deriving (Show, Eq)
 
 modifierPrefixes :: [String]
-modifierPrefixes = ["_", "**", "~~", "[", "`", "[^", "![", "\n", ">", "|"]
+-- modifierPrefixes = ["_", "**", "~~", "[", "`", "[^", "![", "\n", ">"]
+modifierPrefixes = ["|", "_", "**", "~~", "[", "`", "[^", "![", "\n", ">"]
 
 -- == HELPER FUNCTIONS == --
 
@@ -88,7 +94,7 @@ parseUntilModifier = f
       c <- char -- consume first character because we know it failed modifiers
       rest <-
         (asum (map startsWith modifierPrefixes) $> "")
-          <|> eof $> ""
+          -- <|> eof $> ""
           <|> f
       return (c : rest)
 
@@ -135,7 +141,7 @@ parseModifierAndTextUntilNewline :: Parser [ADT]
 parseModifierAndTextUntilNewline =
   some
     ( parseModifiers
-        <|> trace "got here" (isParserSucceed (isNot '\n') *> justText)
+        <|> (isParserSucceed (isNot '\n') *> justText)
     )
 
 parseModifierAndTextUntil :: Char -> Parser [ADT]
@@ -145,11 +151,28 @@ parseModifierAndTextUntil delim =
         <|> ( isParserSucceed (isNot delim)
                 *> ( JustText
                        <$> ( parseUntilModifier
+                               <|> parseUntilNewline
+                               <|> parseUntilEof
                                <|> parseUntil [delim]
                            )
                    )
             )
     )
+
+-- parseUntilSpacesAndDelim :: String -> Parser String
+-- parseUntilSpacesAndDelim delim = f
+--   where
+--     f = (isParserSucceed (inlineSpace *> string delim) *> (inlineSpace *> string delim $> "")) <|> ((:) <$> char <*> f)
+
+parseUntilSpacesAndDelim :: String -> Parser String
+parseUntilSpacesAndDelim delim = f
+  where
+    f = (isParserSucceed (inlineSpace *> string delim) *> trace "removing space and delim" (inlineSpace $> "")) <|> ((:) <$> trace "getting next char" char <*> f)
+
+fun :: String -> Parser String
+fun delim = f
+  where
+    f = (isParserSucceed (inlineSpace *> string delim) *> (inlineSpace *> string delim $> "")) <|> ((:) <$> char <*> f)
 
 -- == PARSERS == --
 
@@ -220,13 +243,15 @@ image =
 footnoteRef :: Parser ADT
 footnoteRef =
   FootnoteRef
-    <$> ( (,)
-            <$> ( getFootnoteNumber
-                    <* string ":"
-                    <* inlineSpace
-                )
-            <*> parseUntilNewline
-            <* is '\n'
+    <$> ( inlineSpace
+            *> ( (,)
+                   <$> ( getFootnoteNumber
+                           <* string ":"
+                           <* inlineSpace
+                       )
+                   <*> parseUntilNewline
+                   <* is '\n'
+               )
         )
 
 -- parses string into heading adt
@@ -257,7 +282,7 @@ altHeading2 :: Parser ADT
 altHeading2 = altHeading 2 '-'
 
 heading :: Parser ADT
-heading = headingHashtag <|> altHeading1 <|> altHeading2
+heading = inlineSpace *> (headingHashtag <|> altHeading1 <|> altHeading2)
 
 -- parses string into blockquote adt
 blockquote :: Parser ADT
@@ -289,17 +314,20 @@ code =
 -- helper function for ordered list to check for proper indentation
 guardIndentation :: String -> Parser ()
 guardIndentation indent = do
-  whitespace <- inlineSpace
-  guard (whitespace == indent)
-    <|> unexpectedStringParser "Unexpected number of spaces"
+  -- make sure theres no other whitespace
+  _ <- isParserSucceed (noneof "\t\r\f\v\n") <|> unexpectedStringParser "Only expected spaces"
+  whitespace <- many (is ' ')
+  guard (whitespace == indent) <|> unexpectedStringParser "Unexpected number of spaces"
 
 -- helper function for ordered list to parse a line of an ordered list
 parseListItemAux :: String -> Parser a -> Parser (a, [ADT])
 parseListItemAux indent parser = do
-  guardIndentation indent -- checks for correct indentation
+  guardIndentation indent
   num <- parser -- gets the number at the front
   -- parses text and checks if theres a sublist
-  textADTs <- parseModifierAndTextUntilNewline <* optional (is '\n')
+  textADTs <-
+    parseModifierAndTextUntilNewline
+      <* optional (is '\n')
   subList <- parseSublist (indent ++ "    ") <|> pure Empty
   let tupleSnd = textADTs ++ [subList] -- concats the sublist to the list
   return (num, tupleSnd)
@@ -328,10 +356,16 @@ orderedList =
         )
 
 -- parses string into table adt
+validateDashes :: [ADT] -> Bool
+validateDashes = all isValidDashCell
+  where
+    isValidDashCell (TableCell [JustText dashes]) = all (== '-') dashes && length dashes >= 3
+    isValidDashCell _ = False
+
 table :: Parser ADT
 table = do
   header <- parseHeader
-  _ <- parseRow -- removes the separating line
+  dashes <- parseRow -- removes the separating line
   rows <- some parseRow
   return (Table ([header] : [rows]))
 
@@ -341,12 +375,47 @@ parseHeader = TableHeader <$> parseTableRow
 parseRow :: Parser ADT
 parseRow = TableRow <$> parseTableRow
 
-parseTableRow :: Parser [[ADT]]
+parseTableRow :: Parser [ADT]
 parseTableRow =
   charTok '|'
-    *> parseModifierAndTextUntil '|' `sepBy1` charTok '|'
-    <* charTok '|'
-    <* optional (is '\n')
+    *> parseTableCell `sepBy1` charTok '|'
+    <* trace "got into here one" optional (is '\n')
+
+-- parseTableCell :: Parser ADT
+-- parseTableCell =
+--   TableCell
+--     <$> ( fmap trimADT
+--             <$> some
+--               ( isParserSucceed (isNot '|')
+--                   *> ( parseModifiers
+--                          <|> JustText
+--                            <$> (parseUntilModifier <|> parseUntil "|")
+--                      )
+--               )
+--         )
+
+parseTableCell :: Parser ADT
+parseTableCell = do
+  cells <- some $ do
+    _ <- isParserSucceed (isNot '|')
+    parseModifiers <|> (JustText <$> (parseUntilModifier <|> parseUntil "|"))
+  return $ TableCell (fmap trimADT cells)
+
+----------------------------------------------------------------------
+-- got this function from github copilot, did not make this on my own.
+trim :: String -> String
+trim = reverse . dropWhile (== ' ') . reverse
+
+----------------------------------------------------------------------
+
+trimADT :: ADT -> ADT
+trimADT (JustText str) = JustText (trim str)
+trimADT (Italic str) = Italic (trim str)
+trimADT (Bold str) = Bold (trim str)
+trimADT (Strikethrough str) = Strikethrough (trim str)
+trimADT (InlineCode str) = InlineCode (trim str)
+trimADT (Paragraph str) = Paragraph (trim str)
+trimADT _ = Empty
 
 -- parses text into adt
 parseModifiers :: Parser ADT
@@ -360,18 +429,16 @@ parseModifiers =
 
 -- parses string into paragraph adt
 paragraph :: Parser ADT
-paragraph = Paragraph <$> parseUntilModifier
+paragraph = Paragraph <$> (parseUntilModifier <|> parseUntilNewline <|> parseUntilEof)
 
 parseNonModifiers :: Parser ADT
 parseNonModifiers =
-  inlineSpace
-    *> ( footnoteRef
-           <|> image
-           <|> heading
-           <|> blockquote
-           <|> code
-           <|> orderedList
-       )
+  footnoteRef
+    <|> image
+    <|> heading
+    <|> blockquote
+    <|> code
+    <|> orderedList
 
 -- == MAIN PARSER == --
 
@@ -389,3 +456,13 @@ getTime = formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S" <$> getCurrentTime
 
 convertADTHTML :: ADT -> String
 convertADTHTML Empty = "IMPLEMENT_THIS"
+
+-- HTML stuff
+
+tag :: String -> String -> String
+tag t content = "<" ++ t ++ ">" ++ content ++ "</" ++ t ++ ">"
+
+altTag :: String -> String
+altTag content = "<" ++ content ++ "/>"
+
+-- htmlItalic :: Parser ADT -> String

@@ -264,6 +264,9 @@ inlineSpace = many (oneof "\t\r\f\v ")
 inlineSpace1 :: Parser String
 inlineSpace1 = some (oneof "\t\r\f\v ")
 
+inlineSpaceWithoutSpace1 :: Parser String
+inlineSpaceWithoutSpace1 = some (oneof "\t\r\f\v\n")
+
 allSpace :: Parser String
 allSpace = many (oneof "\t\r\f\v \n")
 
@@ -339,7 +342,7 @@ stringTok :: String -> Parser String
 stringTok = tok . string
 
 sepBy1 :: Parser a -> Parser b -> Parser [a]
-sepBy1 pa pb = pa <:> many (pb *> pa)
+sepBy1 pa pb = pa <:> some (pb *> pa)
   where
     -- (Optional) cons the results of two parsers
     (<:>) :: Parser a -> Parser [a] -> Parser [a]
