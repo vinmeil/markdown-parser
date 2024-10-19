@@ -1,10 +1,11 @@
-module Assignment (markdownParser, convertADTHTML) where
+module Assignment (markdownParser, convertADTHTML, convertADTHTMLBoilerplate) where
 
 import Control.Applicative
-import Control.Monad (guard)
+import Control.Monad (guard, mfilter)
 import Data.Char (toUpper)
 import Data.Functor (($>))
 import Data.List (intercalate)
+import Data.Maybe (fromMaybe)
 import Data.Time.Clock (getCurrentTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import Debug.Trace (trace)
@@ -31,7 +32,7 @@ import Parser
 data ADT
   = Empty
   | JustText String
-  | Newline Char
+  | Newline
   | Paragraph [ADT]
   | Italic String
   | Bold String
@@ -135,7 +136,7 @@ parseModifierAndTextUntilNewline =
 -- my own parsers --
 
 newline :: Parser ADT
-newline = Newline <$> is '\n'
+newline = is '\n' $> Newline
 
 justText :: Parser ADT
 justText = JustText <$> (parseUntilModifier <|> parseUntilNewline <|> parseUntilEof)
@@ -226,7 +227,7 @@ blockquote = do
     _ <- inlineSpace
     _ <- charTok '>'
     adts <- paragraph
-    _ <- optional newline
+    _ <- optional (is '\n')
     return adts
   return $ Blockquote quotes
 
@@ -395,21 +396,15 @@ markdownParser = Markdown <$> parseText
 getTime :: IO String
 getTime = formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S" <$> getCurrentTime
 
-convertADTHTML :: ADT -> String
-convertADTHTML (Markdown adts) = concatMap convertADTHTML adts
-convertADTHTML (JustText str) = str
-convertADTHTML (Newline _) = ""
-convertADTHTML (Italic str) = tag "em" str
-convertADTHTML (Bold str) = tag "strong" str
-convertADTHTML (Strikethrough str) = tag "del" str
-convertADTHTML (InlineCode str) = tag "code" str
-convertADTHTML (Link (text, url)) = tagWithHref "a" url text
-convertADTHTML (Footnote num) = do
+htmlFootnote :: Int -> String
+htmlFootnote num = do
   let idAttr = htmlId ("fn" ++ show num ++ "ref")
   let hrefAttr = href ("#fn" ++ show num)
   let anchorTag = tagWithStringInside "a" (idAttr ++ " " ++ hrefAttr) (show num)
   tag "sup" anchorTag
-convertADTHTML (Image (alt, url, caption)) =
+
+htmlImage :: String -> String -> String -> String
+htmlImage alt url caption =
   altTag
     "img"
     ( "src=\""
@@ -421,19 +416,43 @@ convertADTHTML (Image (alt, url, caption)) =
         ++ "\""
     )
     ++ "\n"
-convertADTHTML (FootnoteRef (num, content)) =
-  tagWithId "p" ("fn" ++ show num) content ++ "\n"
-convertADTHTML (Paragraph adts) =
-  tag "p" (concatMap convertADTHTML adts) ++ "\n"
-convertADTHTML (Heading (n, adts)) =
-  tag ("h" ++ show n) (concatMap convertADTHTML adts) ++ "\n"
-convertADTHTML (Blockquote adts) = indentInside "blockquote" adts
-convertADTHTML (Code ("", content)) = tag "pre" (tag "code" content) ++ "\n"
-convertADTHTML (Code (opening, content)) = do
-  let codeTag = tagWithStringInside "code" ("class=\"language-" ++ opening ++ "\"") content
+
+htmlFootnoteRef :: Int -> String -> String
+htmlFootnoteRef num content = tagWithId "p" ("fn" ++ show num) content ++ "\n"
+
+htmlParagraph :: [ADT] -> String
+htmlParagraph adts = tag "p" (concatMap convertADTHTML adts)
+
+htmlHeading :: Int -> [ADT] -> String
+htmlHeading n adts = tag ("h" ++ show n) (concatMap convertADTHTML adts) ++ "\n"
+
+htmlCodeLanguage :: String -> String -> String
+htmlCodeLanguage lang content = do
+  let codeTag = tagWithStringInside "code" ("class=\"language-" ++ lang ++ "\"") content
   let preTag = tag "pre" codeTag
   preTag ++ "\n"
+
+convertADTHTMLBoilerplate :: String -> ADT -> String
+convertADTHTMLBoilerplate title adt = boilerplate [adt] title
+
+convertADTHTML :: ADT -> String
+convertADTHTML (Markdown adts) = indentInside "body" adts
+convertADTHTML (JustText str) = str
+convertADTHTML Newline = ""
 convertADTHTML Empty = ""
+convertADTHTML (Italic str) = tag "em" str
+convertADTHTML (Bold str) = tag "strong" str
+convertADTHTML (Strikethrough str) = tag "del" str
+convertADTHTML (InlineCode str) = tag "code" str
+convertADTHTML (Link (text, url)) = tagWithHref "a" url text
+convertADTHTML (Footnote num) = htmlFootnote num
+convertADTHTML (Image (alt, url, caption)) = htmlImage alt url caption
+convertADTHTML (FootnoteRef (num, content)) = htmlFootnoteRef num content
+convertADTHTML (Paragraph adts) = htmlParagraph adts
+convertADTHTML (Heading (n, adts)) = htmlHeading n adts
+convertADTHTML (Blockquote adts) = indentInside "blockquote" adts
+convertADTHTML (Code ("", content)) = tag "pre" (tag "code" content) ++ "\n"
+convertADTHTML (Code (opening, content)) = htmlCodeLanguage opening content
 convertADTHTML (ListItem adts) = tag "li" (concatMap convertADTHTML adts)
 convertADTHTML (OrderedList items) = indentInside "ol" items
 convertADTHTML (Table rows) = indentInside "table" rows
@@ -442,6 +461,8 @@ convertADTHTML (TableRow cells) = indentInside "tr" cells
 convertADTHTML (TableHeaderCell adts) = tag "th" (concatMap convertADTHTML adts)
 convertADTHTML (TableRowCell adts) = tag "td" (concatMap convertADTHTML adts)
 
+------------------------------------------------
+-- got this code from github copilot. i did not make this on my own
 indentInside :: String -> [ADT] -> String
 indentInside t adts =
   openTag t
@@ -451,29 +472,25 @@ indentInside t adts =
     ++ closeTag t
     ++ "\n"
 
-openTag :: String -> String
-openTag t = "<" ++ t ++ ">"
-
--- Helper function to close a tag
-closeTag :: String -> String
-closeTag t = "</" ++ t ++ ">"
-
--- Helper function to filter out Empty ADTs
-filterNonEmpty :: [ADT] -> [ADT]
-filterNonEmpty = filter (/= Empty)
-
--- Helper function to indent lines
 indentString :: String -> String
 indentString = intercalate "\n" . map ("    " ++) . lines
 
-test :: ParseResult [ADT] -> String
-test (Result _ adtList) = concatMap convertADTHTML adtList
-test _ = "Parsing failed"
+--
+------------------------------------------------
 
--- Helper functions stuff
+openTag :: String -> String
+openTag t = "<" ++ t ++ ">"
+
+-- helper function to close a tag
+closeTag :: String -> String
+closeTag t = "</" ++ t ++ ">"
+
+-- helper function to filter out Empty adts
+filterNonEmpty :: [ADT] -> [ADT]
+filterNonEmpty = filter (\x -> x /= Empty && x /= Newline)
 
 tag :: String -> String -> String
-tag t content = "<" ++ t ++ ">" ++ content ++ "</" ++ t ++ ">"
+tag t content = openTag t ++ content ++ closeTag t
 
 altTag :: String -> String -> String
 altTag t content = "<" ++ t ++ " " ++ content ++ ">"
@@ -495,3 +512,17 @@ tagWithId t str content =
 tagWithStringInside :: String -> String -> String -> String
 tagWithStringInside t str content =
   "<" ++ t ++ " " ++ str ++ ">" ++ content ++ "</" ++ t ++ ">"
+
+boilerplate :: [ADT] -> String -> String
+boilerplate content inputTitle =
+  let title = fromMaybe "Test" (mfilter (not . null) (Just inputTitle))
+   in "<!DOCTYPE html>\n"
+        ++ "<html lang=\"en\">\n\n"
+        ++ "<head>\n"
+        ++ "    <meta charset=\"UTF-8\">\n"
+        ++ "    <title>"
+        ++ title
+        ++ "</title>\n"
+        ++ "</head>\n"
+        ++ concatMap convertADTHTML content
+        ++ "</html>\n"

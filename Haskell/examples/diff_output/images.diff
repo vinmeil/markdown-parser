@@ -1,8 +1,8 @@
 diff --git a/examples/expected_output/images.html b/examples/output/images.html
-index 1e9c5189..dfaca94c 100644
+index 55b5731..ea164f5 100644
 --- a/examples/expected_output/images.html
 +++ b/examples/output/images.html
-@@ -1,13 +1 @@
+@@ -1,13 +1,3 @@
 -<!DOCTYPE html>
 -<html lang="en">
 -
@@ -11,10 +11,8 @@ index 1e9c5189..dfaca94c 100644
 -    <title>Test</title>
 -</head>
 -
--<body>
--    <p><img src="image.png" alt="Alt Text" title="Caption Text"></p>
--</body>
+ <body>
+     <img src="image.png" alt="Alt Text" title="Caption Text">
+ </body>
 -
 -</html>
-+IMPLEMENT_THIS
-\ No newline at end of file
