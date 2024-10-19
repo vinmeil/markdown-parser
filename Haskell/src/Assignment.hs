@@ -1,4 +1,4 @@
-module Assignment (markdownParser, convertADTHTML, convertADTHTMLBoilerplate) where
+module Assignment (markdownParser, convertADTHTML, convertADTHTMLBoilerplate, getTime) where
 
 import Control.Applicative
 import Control.Monad (guard, mfilter)
@@ -515,7 +515,7 @@ tagWithStringInside t str content =
 
 boilerplate :: [ADT] -> String -> String
 boilerplate content inputTitle =
-  let title = fromMaybe "Test" (mfilter (not . null) (Just inputTitle))
+  let title = fromMaybe "Converted HTML" (mfilter (not . null) (Just inputTitle))
    in "<!DOCTYPE html>\n"
         ++ "<html lang=\"en\">\n\n"
         ++ "<head>\n"

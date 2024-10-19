@@ -1,5 +1,13 @@
-import { fromEvent, merge } from "rxjs";
-import { map, mergeScan, first } from "rxjs/operators";
+import { fromEvent, merge, of } from "rxjs";
+import {
+    map,
+    mergeScan,
+    first,
+    tap,
+    mergeWith,
+    mergeMap,
+    switchMap,
+} from "rxjs/operators";
 import { ajax } from "rxjs/ajax";
 import { type Observable } from "rxjs";
 import { State } from "./types";
@@ -19,6 +27,8 @@ const markdownInput = document.getElementById(
     "markdown-input",
 ) as HTMLTextAreaElement;
 const checkbox = document.querySelector('input[name="checkbox"]')!;
+const titleInput = document.getElementById("title-input") as HTMLInputElement;
+const saveButton = document.getElementById("save-button") as HTMLButtonElement;
 
 type Action = (_: State) => State;
 
@@ -38,7 +48,21 @@ const input$: Observable<Action> = fromEvent<KeyboardEvent>(
     "input",
 ).pipe(
     map((event) => (event.target as HTMLInputElement).value),
-    map((value) => (s) => ({ ...s, markdown: value })),
+    mergeWith(of(markdownInput.value)),
+    map((value) => (s) => ({ ...s, markdown: value, save: false })),
+);
+
+const titleInput$: Observable<Action> = fromEvent<KeyboardEvent>(
+    titleInput,
+    "input",
+).pipe(
+    map((event) => (event.target as HTMLInputElement).value),
+    mergeWith(of(titleInput.value)),
+    map((value) => (s) => ({ ...s, title: value })),
+);
+
+const saveButton$ = fromEvent<Action>(saveButton, "mousedown").pipe(
+    map((_) => (s: State) => ({ ...s, save: true })),
 );
 
 const checkboxStream$: Observable<Action> = fromEvent(checkbox, "change").pipe(
@@ -54,7 +78,7 @@ function getHTML(s: State): Observable<State> {
         headers: {
             "Content-Type": "application/x-www-form-urlencoded",
         },
-        body: s.markdown,
+        body: [s.markdown, s.title].join("💀"),
     }).pipe(
         map((response) => response.response), // Extracting the response data
         map((data) => {
@@ -67,46 +91,85 @@ function getHTML(s: State): Observable<State> {
     );
 }
 
+function saveHTML(s: State): Observable<State> {
+    console.log("in here");
+    return ajax<{ success: string }>({
+        url: "/api/saveHTML",
+        method: "POST",
+        headers: {
+            "Content-Type": "text/plain",
+        },
+        body: s.HTML,
+    }).pipe(
+        map((response) => response.response),
+        map((_) => s),
+        first(),
+    );
+}
+
 const initialState: State = {
     markdown: "",
     HTML: "",
     renderHTML: true,
     save: false,
+    title: "",
 };
 
 function main() {
     // Subscribe to the input Observable to listen for changes
-    const subscription = merge(input$, checkboxStream$)
+    const subscription = merge(
+        input$,
+        titleInput$,
+        checkboxStream$,
+        saveButton$,
+    )
         .pipe(
-            map((reducer: Action) => {
-                // Reset Some variables in the state in every tick
-                const newReducer = compose(reducer)(resetState);
-                return newReducer;
-            }),
+            // this messes up the state because it keeps setting save to false
+            // map((reducer: Action) => {
+            //     // Reset Some variables in the state in every tick
+            //     const newReducer = compose(reducer)(resetState);
+            //     return newReducer;
+            // }),
             mergeScan((acc: State, reducer: Action) => {
                 const newState = reducer(acc);
                 // getHTML returns an observable of length one
                 // so we `scan` and merge the result of getHTML in to our stream
                 return getHTML(newState);
             }, initialState),
+            switchMap((state: State) => {
+                if (state.save) {
+                    return saveHTML(state).pipe(
+                        map((savedState) => ({
+                            ...savedState,
+                            save: false, // Reset the save flag after saving
+                        })),
+                    );
+                }
+                return of(state);
+            }),
         )
         .subscribe((value) => {
-            const htmlOutput = document.getElementById("html-output");
+            const htmlOutput = document.getElementById(
+                "html-output",
+            ) as HTMLTextAreaElement | null;
+            console.log(value);
+            const htmlRender = document.getElementById("html-render");
             if (htmlOutput) {
                 htmlOutput.innerHTML = "";
                 htmlOutput.textContent = "";
-                if (value.renderHTML) {
-                    const highlight =
-                        '<link rel="stylesheet" href="https://unpkg.com/@highlightjs/cdn-assets@11.3.1/styles/default.min.css" />';
-                    htmlOutput.innerHTML = highlight + value.HTML;
-                    // Magic code to add code highlighting
-                    const blocks = htmlOutput.querySelectorAll("pre code");
-                    blocks.forEach((block) =>
-                        hljs.highlightElement(block as HTMLElement),
-                    );
-                } else {
-                    htmlOutput.textContent = value.HTML;
-                }
+                htmlOutput.textContent = value.HTML;
+                htmlOutput.value = value.HTML;
+            }
+            if (htmlRender) {
+                htmlRender.innerHTML = "";
+                htmlRender.textContent = "";
+                const highlight =
+                    '<link rel="stylesheet" href="https://unpkg.com/@highlightjs/cdn-assets@11.3.1/styles/default.min.css" />';
+                htmlRender.innerHTML = highlight + value.HTML;
+                const blocks = htmlRender.querySelectorAll("pre code");
+                blocks.forEach((block) =>
+                    hljs.highlightElement(block as HTMLElement),
+                );
             }
         });
 }

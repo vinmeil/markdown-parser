@@ -1,35 +1,71 @@
 <!DOCTYPE html>
 <html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Markdown to HTML Converter</title>
+        <link rel="stylesheet" href="/style.css" />
+    </head>
 
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Markdown to HTML Converter</title>
-    <link rel="stylesheet" href="/style.css">
-</head>
+    <body>
+        <header>
+            <h1>Markdown to HTML Converter</h1>
+        </header>
 
-<body>
-    <header>
-        <h1>Markdown to HTML Converter</h1>
-    </header>
-
-    <main>
-        <div id="container" style="display: flex; width: 100%;">
-            <section id="input-section" style="flex: 1; padding-right: 10px;">
-                <h2>Enter Markdown:</h2>
-                <textarea id="markdown-input" placeholder="Enter your Markdown here..." style="width: 100%;"></textarea>
-            </section>
-            <section id="output-section" style="flex: 1; padding-left: 10px;">
-                <h2>HTML Output:</h2>
-                <div id="html-output"></div>
-                <label><input type="checkbox" name="checkbox" checked>Render HTML</label>
-            </section>
-        </div>
-    </main>
-    <footer>
-        <p>Developed by Your Name</p>
-    </footer>
-    <script src="./src/main.ts" type="module"></script>
-</body>
-
+        <main>
+            <label
+                ><input type="checkbox" name="checkbox" checked />Render
+                HTML</label
+            >
+            <div id="container" style="display: flex; box-sizing: border-box">
+                <section
+                    id="input-section"
+                    style="flex: 1; width: 100%; box-sizing: border-box"
+                >
+                    <h2 style="flex: 1; width: 100%">Enter Markdown:</h2>
+                    <textarea
+                        id="markdown-input"
+                        placeholder="Enter your Markdown here..."
+                    ></textarea>
+                </section>
+                <section
+                    id="output-section"
+                    style="flex: 1; box-sizing: border-box"
+                >
+                    <h2>HTML Output:</h2>
+                    <textarea
+                        id="html-output"
+                        style="width: 100%; white-space: pre"
+                        readonly
+                    ></textarea>
+                </section>
+            </div>
+            <div
+                style="
+                    width: 90vw;
+                    display: flex;
+                    justify-content: flex-end;
+                    gap: 10px;
+                "
+            >
+                <input id="title-input" placeholder="Enter markdown title" />
+                <button
+                    id="save-button"
+                    style="width: 10%; padding-top: 8px; padding-bottom: 8px"
+                >
+                    Save
+                </button>
+            </div>
+            <div id="render-container" style="display: flex; width: 100%">
+                <section id="render-section" style="flex: 1">
+                    <h2>HTML Render</h2>
+                    <div id="html-render"></div>
+                </section>
+            </div>
+        </main>
+        <footer>
+            <p>Developed by a declining sanity</p>
+        </footer>
+        <script src="./src/main.ts" type="module"></script>
+    </body>
 </html>
