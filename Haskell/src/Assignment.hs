@@ -1,11 +1,9 @@
 module Assignment (markdownParser, convertADTHTML) where
 
 import Control.Applicative
-import Control.Exception (try)
 import Control.Monad (guard)
 import Data.Char (toUpper)
 import Data.Functor (($>))
-import Data.List
 import Data.Time.Clock (getCurrentTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import Debug.Trace (trace)
@@ -206,6 +204,7 @@ footnoteRef = do
   _ <- inlineSpace
   num <- getFootnoteNumber <* string ":" <* inlineSpace
   content <- (parseUntilNewline <|> parseUntilEof) <* optional (is '\n')
+  -- content <- Paragraph <$> (parseUntilNewline <|> parseUntilEof) <* optional (is '\n')
   return $ FootnoteRef (num, content)
 
 headingHashtag :: Parser ADT
@@ -294,12 +293,6 @@ orderedList = do
   return $ OrderedList (firstItem : rest)
 
 -- parses string into table adt
-validateDashes :: [ADT] -> Bool
-validateDashes = all isValidDashCell
-  where
-    isValidDashCell (TableCell [JustText dashes]) = all (== '-') dashes && length dashes >= 3
-    isValidDashCell _ = False
-
 table :: Parser ADT
 table = do
   header <- parseHeader
@@ -391,14 +384,109 @@ getTime :: IO String
 getTime = formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S" <$> getCurrentTime
 
 convertADTHTML :: ADT -> String
-convertADTHTML Empty = "IMPLEMENT_THIS"
+convertADTHTML (Italic str) = tag "em" str
+convertADTHTML (Bold str) = tag "strong" str
+convertADTHTML (Strikethrough str) = tag "del" str
+convertADTHTML (InlineCode str) = tag "code" str
+convertADTHTML (Link (text, url)) = tagWithHref "a" url text
+convertADTHTML (Footnote num) = do
+  let idAttr = htmlId ("fn" ++ show num ++ "ref")
+  let hrefAttr = href ("#fn" ++ show num)
+  let anchorTag = tagWithStringInside "a" (idAttr ++ " " ++ hrefAttr) (show num)
+  tag "sup" anchorTag
+convertADTHTML (Image (alt, url, caption)) = altTag "img" ("src=\"" ++ url ++ "\" alt=\"" ++ alt ++ "\" title=\"" ++ caption ++ "\"")
+convertADTHTML (FootnoteRef (num, content)) = tagWithId "p" ("fn" ++ show num) content
+convertADTHTML (Paragraph str) = str
+convertADTHTML _ = ""
 
--- HTML stuff
+-- given a list of ADTs: [Paragraph "hi ",Bold "md",Newline '\n',Paragraph "ofc"]
+-- if it sees a paragraph first, it will begin with a <p> tag and then convertADTHTML the rest
+-- until it meets a Newline, then it will close the <p>. if it sees something like this:
+-- [Paragraph "hi ",Bold "md",Paragraph "ofc", Newline '\n', Paragraph "bye"]
+-- it will ignore the 2nd Paragraph because it hasnt reached a Newline yet, so its still part of the
+-- same paragraph
+htmlParagraph :: [ADT] -> String
+htmlParagraph [] = ""
+htmlParagraph (x : xs) = case x of
+  Paragraph str -> "<p>" ++ str ++ processRest xs
+  Newline _ -> "</p>\n" ++ processRest xs
+  _ -> convertADTHTML x ++ processRest xs
+  where
+    processRest [] = ""
+    processRest (y : ys) = case y of
+      Paragraph str -> str ++ processRest ys
+      Newline _ -> "</p>\n<p>" ++ processRest ys
+      _ -> convertADTHTML y ++ processRest ys
+
+test :: ParseResult [ADT] -> String
+test (Result _ adtList) = concatMap convertADTHTML adtList
+test _ = "Parsing failed"
+
+-- Helper functions stuff
 
 tag :: String -> String -> String
 tag t content = "<" ++ t ++ ">" ++ content ++ "</" ++ t ++ ">"
 
-altTag :: String -> String
-altTag content = "<" ++ content ++ "/>"
+altTag :: String -> String -> String
+altTag t content = "<" ++ t ++ " " ++ content ++ ">"
 
--- htmlItalic :: Parser ADT -> String
+href :: String -> String
+href url = "href=\"" ++ url ++ "\""
+
+htmlId :: String -> String
+htmlId str = "id=\"" ++ str ++ "\""
+
+tagWithHref :: String -> String -> String -> String
+tagWithHref t url content = "<" ++ t ++ " " ++ href url ++ ">" ++ content ++ "</" ++ t ++ ">"
+
+tagWithId :: String -> String -> String -> String
+tagWithId t str content = "<" ++ t ++ " " ++ htmlId str ++ ">" ++ content ++ "</" ++ t ++ ">"
+
+tagWithStringInside :: String -> String -> String -> String
+tagWithStringInside t str content = "<" ++ t ++ " " ++ str ++ ">" ++ content ++ "</" ++ t ++ ">"
+
+-- htmlModifiers :: ADT -> String
+-- htmlModifiers (Italic str) = tag "em" str
+-- htmlModifiers (Bold str) = tag "strong" str
+-- htmlModifiers (Strikethrough str) = tag "del" str
+-- htmlModifiers (InlineCode str) = tag "code" str
+-- htmlModifiers (Link (text, url)) = tagWithHref "a" url text
+-- htmlModifiers (Footnote num) =
+--   tag
+--     "sup"
+--     ( tagWithStringInside
+--         "a"
+--         (htmlId ("fn" ++ show num ++ "ref") ++ " " ++ href ("#fn" ++ show num))
+--         (show num)
+--     )
+-- htmlModifiers _ = ""
+
+-- htmlP :: [ADT] -> String
+-- htmlP [] = ""
+-- htmlP (x : xs) = case x of
+--   Paragraph str -> "<p>" ++ str ++ processRest xs
+--   Newline _ -> "</p>\n" ++ processRest xs
+--   _ -> htmlModifiers x ++ processRest xs
+--   where
+--     processRest [] = ""
+--     processRest (y : ys) = case y of
+--       Paragraph str -> str ++ processRest ys
+--       Newline _ -> "</p>\n<p>" ++ processRest ys
+--       _ -> htmlModifiers y ++ processRest ys
+
+-- htmlWithoutP :: [ADT] -> String
+-- htmlWithoutP [] = ""
+-- htmlWithoutP (x : xs) = case x of
+--   JustText str -> str ++ processRest xs
+--   Newline _ -> processRest xs
+--   _ -> htmlModifiers x ++ processRest xs
+--   where
+--     processRest [] = ""
+--     processRest (y : ys) = case y of
+--       JustText str -> str ++ processRest ys
+--       Newline _ -> processRest ys
+--       _ -> htmlModifiers y ++ processRest ys
+
+-- htmlHeading :: [ADT] -> String
+-- htmlHeading [Heading (n, adts)] = "<h" ++ show n ++ ">" ++ htmlWithoutP adts ++ "</h" ++ show n ++ ">"
+-- htmlHeading _ = ""
