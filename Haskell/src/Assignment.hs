@@ -13,12 +13,11 @@ import Parser
 -- BNF
 -- <Number>        ::= '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9'
 -- <Char>          ::= any character honestly
--- <Text>          ::= <AnyChar> | <AnyChar> <Text>
--- <URL>           ::= <Text>
+-- <Text>          ::= <Char> | <Char> <Text>
 -- <Italic>        ::= '_' <Text> '_'
 -- <Bold>          ::= '**' <Text> '**'
 -- <Strikethrough> ::= '~~' <Text> '~~'
--- <Link>          ::= '[' <Text> ']' '(' <URL> ')'
+-- <Link>          ::= '[' <Text> ']' '(' <Text> ')'
 -- <InlineCode>    ::= '`' <Text> '`'
 -- <Footnote>      ::= '[^' <Number> ']'
 -- <Image>         ::= '!' '[' <Text> ']' '(' <URL>  '"' <Text> '"' ')'
@@ -30,10 +29,9 @@ import Parser
 
 data ADT
   = Empty
-  | -- Your ADT **must** derive Show.
-    JustText String
+  | JustText String
   | Newline Char
-  | Paragraph String
+  | Paragraph [ADT]
   | Italic String
   | Bold String
   | Strikethrough String
@@ -43,17 +41,14 @@ data ADT
   | Image (String, String, String)
   | FootnoteRef (Int, String)
   | Heading (Int, [ADT])
-  | Blockquote [[ADT]]
+  | Blockquote [ADT]
   | Code (String, String)
   | OrderedList [(Int, [ADT])]
-  | -- | Table [ADT]
-    Table [[ADT]]
-  | -- | TableHeader [ADT]
-    TableHeader [ADT]
-  | -- | TableRow [ADT]
-    TableRow [ADT]
+  | Table [[ADT]]
+  | TableHeader [ADT]
+  | TableRow [ADT]
   | TableCell [ADT]
-  -- Footnote String
+  | Markdown [ADT]
   deriving (Show, Eq)
 
 modifierPrefixes :: [String]
@@ -86,10 +81,7 @@ parseUntilModifier = f
   where
     f = do
       c <- char -- consume first character because we know it failed modifiers
-      rest <-
-        (asum (map startsWith modifierPrefixes) $> "")
-          -- <|> eof $> ""
-          <|> f
+      rest <- (asum (map startsWith modifierPrefixes) $> "") <|> f
       return (c : rest)
 
 -- should return an error if theres more
@@ -238,10 +230,16 @@ blockquote = do
   quotes <- some $ do
     _ <- inlineSpace
     _ <- charTok '>'
-    adts <- parseModifierAndTextUntilNewline
+    -- adts <- parseModifierAndTextUntilNewline
+    adts <- paragraph
     _ <- optional newline
     return adts
   return $ Blockquote quotes
+
+-- justTextUntil :: String -> Parser [ADT]
+-- justTextUntil str = some $ do
+--   text <- parseUntil
+--   return $ JustText text
 
 -- Helper function for code block to recursively parse until closing code block
 parseUntilClosingCode :: Parser String
@@ -343,7 +341,7 @@ trimADT (Italic str) = Italic (trim str)
 trimADT (Bold str) = Bold (trim str)
 trimADT (Strikethrough str) = Strikethrough (trim str)
 trimADT (InlineCode str) = InlineCode (trim str)
-trimADT (Paragraph str) = Paragraph (trim str)
+-- trimADT (Paragraph str) = Paragraph (trim str)
 trimADT _ = Empty
 
 -- parses text into adt
@@ -357,8 +355,12 @@ parseModifiers =
     <|> footnote
 
 -- parses string into paragraph adt
+-- should return a list of something like [JustText "hi ", Bold "md", JustText "ofc"]
 paragraph :: Parser ADT
-paragraph = Paragraph <$> (parseUntilModifier <|> parseUntilNewline <|> parseUntilEof)
+paragraph = do
+  Paragraph <$> parseModifierAndTextUntilNewline
+
+-- paragraph = Paragraph <$> (parseUntilModifier <|> parseUntilNewline <|> parseUntilEof)
 
 parseNonModifiers :: Parser ADT
 parseNonModifiers =
@@ -374,16 +376,18 @@ parseNonModifiers =
 parseText :: Parser [ADT]
 parseText = do
   _ <- allSpace
-  many
-    (newline <|> parseNonModifiers <|> parseModifiers <|> paragraph)
+  many (newline <|> parseNonModifiers <|> paragraph)
 
 markdownParser :: Parser ADT
-markdownParser = pure Empty
+markdownParser = Markdown <$> parseText
 
 getTime :: IO String
 getTime = formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S" <$> getCurrentTime
 
 convertADTHTML :: ADT -> String
+convertADTHTML (Markdown adts) = concatMap convertADTHTML adts
+convertADTHTML (JustText str) = str
+convertADTHTML (Newline _) = ""
 convertADTHTML (Italic str) = tag "em" str
 convertADTHTML (Bold str) = tag "strong" str
 convertADTHTML (Strikethrough str) = tag "del" str
@@ -394,29 +398,15 @@ convertADTHTML (Footnote num) = do
   let hrefAttr = href ("#fn" ++ show num)
   let anchorTag = tagWithStringInside "a" (idAttr ++ " " ++ hrefAttr) (show num)
   tag "sup" anchorTag
-convertADTHTML (Image (alt, url, caption)) = altTag "img" ("src=\"" ++ url ++ "\" alt=\"" ++ alt ++ "\" title=\"" ++ caption ++ "\"")
-convertADTHTML (FootnoteRef (num, content)) = tagWithId "p" ("fn" ++ show num) content
-convertADTHTML (Paragraph str) = str
+convertADTHTML (Image (alt, url, caption)) = altTag "img" ("src=\"" ++ url ++ "\" alt=\"" ++ alt ++ "\" title=\"" ++ caption ++ "\"") ++ "\n"
+convertADTHTML (FootnoteRef (num, content)) = tagWithId "p" ("fn" ++ show num) content ++ "\n"
+convertADTHTML (Paragraph adts) = tag "p" (concatMap convertADTHTML adts) ++ "\n"
+convertADTHTML (Heading (n, adts)) = tag ("h" ++ show n) (concatMap convertADTHTML adts) ++ "\n"
+convertADTHTML (Blockquote adts) = "<blockquote>\n" ++ (concatMap convertADTHTML adts) ++ "</blockquote>\n"
 convertADTHTML _ = ""
 
--- given a list of ADTs: [Paragraph "hi ",Bold "md",Newline '\n',Paragraph "ofc"]
--- if it sees a paragraph first, it will begin with a <p> tag and then convertADTHTML the rest
--- until it meets a Newline, then it will close the <p>. if it sees something like this:
--- [Paragraph "hi ",Bold "md",Paragraph "ofc", Newline '\n', Paragraph "bye"]
--- it will ignore the 2nd Paragraph because it hasnt reached a Newline yet, so its still part of the
--- same paragraph
-htmlParagraph :: [ADT] -> String
-htmlParagraph [] = ""
-htmlParagraph (x : xs) = case x of
-  Paragraph str -> "<p>" ++ str ++ processRest xs
-  Newline _ -> "</p>\n" ++ processRest xs
-  _ -> convertADTHTML x ++ processRest xs
-  where
-    processRest [] = ""
-    processRest (y : ys) = case y of
-      Paragraph str -> str ++ processRest ys
-      Newline _ -> "</p>\n<p>" ++ processRest ys
-      _ -> convertADTHTML y ++ processRest ys
+indentInside :: String -> [ADT] -> String
+indentInside = 
 
 test :: ParseResult [ADT] -> String
 test (Result _ adtList) = concatMap convertADTHTML adtList
