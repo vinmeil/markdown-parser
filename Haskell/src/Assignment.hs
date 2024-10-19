@@ -2,32 +2,48 @@ module Assignment (markdownParser, convertADTHTML, convertADTHTMLBoilerplate, ge
 
 import Control.Applicative
 import Control.Monad (guard, mfilter)
-import Data.Char (toUpper)
 import Data.Functor (($>))
 import Data.List (intercalate)
 import Data.Maybe (fromMaybe)
 import Data.Time.Clock (getCurrentTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
-import Debug.Trace (trace)
 import Instances (ParseError (..), ParseResult (..), Parser (..))
 import Parser
 
 -- BNF
--- <Number>        ::= '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9'
--- <Char>          ::= any character honestly
--- <Text>          ::= <Char> | <Char> <Text>
--- <Italic>        ::= '_' <Text> '_'
--- <Bold>          ::= '**' <Text> '**'
--- <Strikethrough> ::= '~~' <Text> '~~'
--- <Link>          ::= '[' <Text> ']' '(' <Text> ')'
--- <InlineCode>    ::= '`' <Text> '`'
--- <Footnote>      ::= '[^' <Number> ']'
--- <Image>         ::= '!' '[' <Text> ']' '(' <URL>  '"' <Text> '"' ')'
--- <FootnoteRef>   ::= <Footnote> ':' <Text>
---
---
---
---
+-- <Number>          ::= '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9'
+-- <Char>            ::= any character
+-- <Text>            ::= <Char> | <Char> <Text>
+-- <JustText>        ::= <Text>
+-- <Italic>          ::= '_' <Text> '_'
+-- <Bold>            ::= '**' <Text> '**'
+-- <Strikethrough>   ::= '~~' <Text> '~~'
+-- <Link>            ::= '[' <Text> ']' '(' <Text> ')'
+-- <InlineCode>      ::= '`' <Text> '`'
+-- <Footnote>        ::= '[^' <Number> ']'
+-- <Modifiers>       ::= <Italic> | <Bold> | <Strikethrough> | <Link> | <InlineCode> | <Footnote>
+-- <Image>           ::= '![' <Text> ']' '(' <URL>  '"' <Text> '"' ')'
+-- <FootnoteRef>     ::= <Footnote> ':' <Text>
+-- <TextAndModifier> ::= { <JustText> | <Modifiers> }
+-- <Paragraph>       ::= <TextAndModifier>
+-- <Heading1>        ::= '#' <TextAndModifier> '\n'
+-- <Heading2>        ::= '##' <TextAndModifier> '\n'
+-- <Heading3>        ::= '###' <TextAndModifier> '\n'
+-- <Heading4>        ::= '####' <TextAndModifier> '\n'
+-- <Heading5>        ::= '#####' <TextAndModifier> '\n'
+-- <Heading6>        ::= '######' <TextAndModifier> '\n'
+-- <AltHeading1>     ::= <TextAndModifier> '\n' '=' '='
+-- <AltHeading2>     ::= <TextAndModifier> '\n' '-' '-'
+-- <Heading>         ::= <Heading1> | <Heading2> | <Heading3> | <Heading4> | <Heading5> | <Heading6> | <AltHeading1> | <AltHeading2>
+-- <Blockquote>      ::= '>' <Paragraph>
+-- <Code>            ::= '```' [<Text>] '\n' <Text> {'\n' <Text>} '\n```'
+-- <ListItem>        ::= <TextAndModifier> | <OrderedList>
+-- <OrderedList>     ::= <ListItem> | <ListItem> <OrderedList>
+-- <Table>           ::= <TableRow> | <TableRow> <Table>
+-- <TableRow>        ::= <TableHeaderCell>+ | <TableRowCell>+
+-- <TableHeaderCell> ::= <TextAndModifier>
+-- <TableRowCell>    ::= <TextAndModifier>
+-- <Markdown>        ::= <Paragraph> | <Heading> | <Blockquote> | <Code> | <OrderedList> | <Table>
 
 data ADT
   = Empty
