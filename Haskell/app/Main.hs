@@ -39,12 +39,10 @@ main = scotty 3000 $ do
         converted_html = getResult (parse markdownParser md) (convertADTHTMLBoilerplate newTitle)
 
     -- Respond with the converted HTML as JSON
-    liftIO $ putStrLn "Converting MD to HTML..."
     jsonResponse [("html", converted_html)]
 
   post "/api/saveHTML" $ do
     -- gets the request body
-    liftIO $ putStrLn "Saving file..."
     requestBody <- body
     -- Convert the raw request body from ByteString to Text
     let requestBodyText = decodeUtf8 requestBody

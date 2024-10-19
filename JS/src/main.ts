@@ -92,7 +92,6 @@ function getHTML(s: State): Observable<State> {
 }
 
 function saveHTML(s: State): Observable<State> {
-    console.log("in here");
     return ajax<{ success: string }>({
         url: "/api/saveHTML",
         method: "POST",
@@ -152,7 +151,6 @@ function main() {
             const htmlOutput = document.getElementById(
                 "html-output",
             ) as HTMLTextAreaElement | null;
-            console.log(value);
             const htmlRender = document.getElementById("html-render");
             if (htmlOutput) {
                 htmlOutput.innerHTML = "";
