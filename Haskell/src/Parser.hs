@@ -267,6 +267,9 @@ inlineSpace1 = some (oneof "\t\r\f\v ")
 inlineSpaceWithoutSpace1 :: Parser String
 inlineSpaceWithoutSpace1 = some (oneof "\t\r\f\v\n")
 
+notSpace :: Parser Char
+notSpace = noneof " \t\r\f\v\n"
+
 allSpace :: Parser String
 allSpace = many (oneof "\t\r\f\v \n")
 

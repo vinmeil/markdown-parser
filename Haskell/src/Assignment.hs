@@ -4,6 +4,7 @@ import Control.Applicative
 import Control.Monad (guard)
 import Data.Char (toUpper)
 import Data.Functor (($>))
+import Data.List (intercalate)
 import Data.Time.Clock (getCurrentTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import Debug.Trace (trace)
@@ -43,11 +44,13 @@ data ADT
   | Heading (Int, [ADT])
   | Blockquote [ADT]
   | Code (String, String)
-  | OrderedList [(Int, [ADT])]
-  | Table [[ADT]]
+  | OrderedList [ADT]
+  | ListItem [ADT]
+  | Table [ADT]
   | TableHeader [ADT]
   | TableRow [ADT]
-  | TableCell [ADT]
+  | TableRowCell [ADT]
+  | TableHeaderCell [ADT]
   | Markdown [ADT]
   deriving (Show, Eq)
 
@@ -58,15 +61,11 @@ modifierPrefixes = ["|", "_", "**", "~~", "[", "`", "[^", "![", "\n", ">"]
 
 positiveInt :: Parser Int
 positiveInt = do
-  num <- int
-  guard (num > 0) <|> unexpectedStringParser "Expected positive integer"
-  return num
+  _ <- isParserSucceed notSpace
+  isParserSucceed (isNot '-') *> int
 
 startsWith :: String -> Parser ()
 startsWith str = isParserSucceed (string str)
-
-flipTuple :: (a, b) -> (b, a)
-flipTuple (a, b) = (b, a)
 
 parseUntil :: String -> Parser String
 parseUntil str = f (0 :: Int)
@@ -169,11 +168,7 @@ inlinecode = InlineCode <$> getStringBetween "`" "`"
 getFootnoteNumber :: Parser Int
 getFootnoteNumber = do
   _ <- string "[^"
-  spacesBefore <- inlineSpace
   num <- positiveInt
-  spacesAfter <- inlineSpace
-  guard (null spacesAfter && null spacesBefore)
-    <|> unexpectedStringParser "Expected no spaces and positive integer"
   _ <- string "]"
   return num
 
@@ -230,16 +225,10 @@ blockquote = do
   quotes <- some $ do
     _ <- inlineSpace
     _ <- charTok '>'
-    -- adts <- parseModifierAndTextUntilNewline
     adts <- paragraph
     _ <- optional newline
     return adts
   return $ Blockquote quotes
-
--- justTextUntil :: String -> Parser [ADT]
--- justTextUntil str = some $ do
---   text <- parseUntil
---   return $ JustText text
 
 -- Helper function for code block to recursively parse until closing code block
 parseUntilClosingCode :: Parser String
@@ -263,40 +252,39 @@ guardIndentation indent = do
   guard (whitespace == indent) <|> unexpectedStringParser "Unexpected number of spaces"
 
 -- helper function for ordered list to parse a line of an ordered list
-parseListItemAux :: String -> Parser a -> Parser (a, [ADT])
+parseListItemAux :: String -> Parser a -> Parser [ADT]
 parseListItemAux indent parser = do
   _ <- guardIndentation indent
-  num <- parser -- gets the number at the front
-  -- parses text and checks if theres a sublist
+  _ <- parser -- gets the number at the front
   textADTs <- parseModifierAndTextUntilNewline <* optional (is '\n')
   subList <- parseSublist (indent ++ "    ") <|> pure Empty
-  let tupleSnd = textADTs ++ [subList] -- concats the sublist to the list
-  return (num, tupleSnd)
+  let listItems = ListItem textADTs : [subList] -- concats the sublist to the list
+  return listItems
 
 -- helper function for ordered list to parse list items which calls an aux function
-parseListItem :: Int -> String -> Parser (Int, [ADT])
-parseListItem 1 indent = parseListItemAux indent ((string "1. " <* inlineSpace) $> 1)
+parseListItem :: Int -> String -> Parser [ADT]
+parseListItem 1 indent = parseListItemAux indent (string "1. " <* inlineSpace)
 parseListItem _ indent = parseListItemAux indent (positiveInt <* string ". " <* inlineSpace)
 
 parseSublist :: String -> Parser ADT
 parseSublist indent = do
   firstItem <- parseListItem 1 indent
   rest <- many (parseListItem 0 indent)
-  return $ OrderedList (firstItem : rest)
+  return $ OrderedList (concat (firstItem : rest))
 
 orderedList :: Parser ADT
 orderedList = do
   firstItem <- parseListItem 1 ""
   rest <- many (parseListItem 0 "")
-  return $ OrderedList (firstItem : rest)
+  return $ OrderedList (concat (firstItem : rest))
 
 -- parses string into table adt
 table :: Parser ADT
 table = do
-  header <- parseHeader
+  (header, count) <- parseHeader
   _ <- parseSeparator -- removes the separating line
-  rows <- some parseRow
-  return (Table ([header] : [rows]))
+  rows <- some (parseRow count)
+  return (Table (header : rows))
 
 -- parses table header separator
 parseSeparator :: Parser ()
@@ -307,26 +295,48 @@ parseSeparator = do
   _ <- optional (is '\n')
   return ()
 
-parseHeader :: Parser ADT
-parseHeader = TableHeader <$> parseTableRow
+-- parses table header
+parseHeader :: Parser (ADT, Int)
+parseHeader = do
+  _ <- optional (is '\n')
+  (header, rowCount) <- parseHeaderCells 1
+  _ <- string "|\n"
+  return (TableHeader header, rowCount)
 
-parseRow :: Parser ADT
-parseRow = TableRow <$> parseTableRow
+-- helper function to recursively parse header cells and count them
+parseHeaderCells :: Int -> Parser ([ADT], Int)
+parseHeaderCells n = do
+  cell <- TableHeaderCell <$> parseTableCell
+  rest <- (startsWith "|\n" $> ([], n)) <|> parseHeaderCells (n + 1)
+  let (cells, count) = rest
+  return (cell : cells, count)
 
-parseTableRow :: Parser [ADT]
-parseTableRow =
-  charTok '|'
-    *> parseTableCell `sepBy1` charTok '|'
-    <* optional (is '|')
-    <* optional (is '\n')
+parseRow :: Int -> Parser ADT
+parseRow cellCount = TableRow <$> parseTableRow cellCount
 
-parseTableCell :: Parser ADT
+parseTableRow :: Int -> Parser [ADT]
+parseTableRow cellCount = do
+  _ <- optional (is '\n')
+  _ <- inlineSpace
+  cells <- parseNCells cellCount
+  _ <- string "|"
+  return cells
+
+parseNCells :: Int -> Parser [ADT]
+parseNCells 1 = (: []) <$> (TableRowCell <$> parseTableCell)
+parseNCells n = do
+  cell <- TableRowCell <$> parseTableCell
+  rest <- parseNCells (n - 1)
+  return (cell : rest)
+
+parseTableCell :: Parser [ADT]
 parseTableCell = do
+  _ <- charTok '|' -- consume the first |
   adts <- some $ do
     -- get a list of adts
     _ <- isParserSucceed (isNot '|')
     parseModifiers <|> (JustText <$> (parseUntilModifier <|> parseUntil "|"))
-  return $ TableCell (fmap trimADT adts)
+  return (fmap trimADT adts)
 
 ----------------------------------------------------------------------
 -- got this function from github copilot, did not make this on my own.
@@ -370,6 +380,7 @@ parseNonModifiers =
     <|> blockquote
     <|> code
     <|> orderedList
+    <|> table
 
 -- == MAIN PARSER == --
 
@@ -398,15 +409,62 @@ convertADTHTML (Footnote num) = do
   let hrefAttr = href ("#fn" ++ show num)
   let anchorTag = tagWithStringInside "a" (idAttr ++ " " ++ hrefAttr) (show num)
   tag "sup" anchorTag
-convertADTHTML (Image (alt, url, caption)) = altTag "img" ("src=\"" ++ url ++ "\" alt=\"" ++ alt ++ "\" title=\"" ++ caption ++ "\"") ++ "\n"
-convertADTHTML (FootnoteRef (num, content)) = tagWithId "p" ("fn" ++ show num) content ++ "\n"
-convertADTHTML (Paragraph adts) = tag "p" (concatMap convertADTHTML adts) ++ "\n"
-convertADTHTML (Heading (n, adts)) = tag ("h" ++ show n) (concatMap convertADTHTML adts) ++ "\n"
-convertADTHTML (Blockquote adts) = "<blockquote>\n" ++ (concatMap convertADTHTML adts) ++ "</blockquote>\n"
-convertADTHTML _ = ""
+convertADTHTML (Image (alt, url, caption)) =
+  altTag
+    "img"
+    ( "src=\""
+        ++ url
+        ++ "\" alt=\""
+        ++ alt
+        ++ "\" title=\""
+        ++ caption
+        ++ "\""
+    )
+    ++ "\n"
+convertADTHTML (FootnoteRef (num, content)) =
+  tagWithId "p" ("fn" ++ show num) content ++ "\n"
+convertADTHTML (Paragraph adts) =
+  tag "p" (concatMap convertADTHTML adts) ++ "\n"
+convertADTHTML (Heading (n, adts)) =
+  tag ("h" ++ show n) (concatMap convertADTHTML adts) ++ "\n"
+convertADTHTML (Blockquote adts) = indentInside "blockquote" adts
+convertADTHTML (Code ("", content)) = tag "pre" (tag "code" content) ++ "\n"
+convertADTHTML (Code (opening, content)) = do
+  let codeTag = tagWithStringInside "code" ("class=\"language-" ++ opening ++ "\"") content
+  let preTag = tag "pre" codeTag
+  preTag ++ "\n"
+convertADTHTML Empty = ""
+convertADTHTML (ListItem adts) = tag "li" (concatMap convertADTHTML adts)
+convertADTHTML (OrderedList items) = indentInside "ol" items
+convertADTHTML (Table rows) = indentInside "table" rows
+convertADTHTML (TableHeader cells) = indentInside "tr" cells
+convertADTHTML (TableRow cells) = indentInside "tr" cells
+convertADTHTML (TableHeaderCell adts) = tag "th" (concatMap convertADTHTML adts)
+convertADTHTML (TableRowCell adts) = tag "td" (concatMap convertADTHTML adts)
 
 indentInside :: String -> [ADT] -> String
-indentInside = 
+indentInside t adts =
+  openTag t
+    ++ "\n"
+    ++ intercalate "\n" (map (indentString . convertADTHTML) (filterNonEmpty adts))
+    ++ "\n"
+    ++ closeTag t
+    ++ "\n"
+
+openTag :: String -> String
+openTag t = "<" ++ t ++ ">"
+
+-- Helper function to close a tag
+closeTag :: String -> String
+closeTag t = "</" ++ t ++ ">"
+
+-- Helper function to filter out Empty ADTs
+filterNonEmpty :: [ADT] -> [ADT]
+filterNonEmpty = filter (/= Empty)
+
+-- Helper function to indent lines
+indentString :: String -> String
+indentString = intercalate "\n" . map ("    " ++) . lines
 
 test :: ParseResult [ADT] -> String
 test (Result _ adtList) = concatMap convertADTHTML adtList
@@ -427,56 +485,13 @@ htmlId :: String -> String
 htmlId str = "id=\"" ++ str ++ "\""
 
 tagWithHref :: String -> String -> String -> String
-tagWithHref t url content = "<" ++ t ++ " " ++ href url ++ ">" ++ content ++ "</" ++ t ++ ">"
+tagWithHref t url content =
+  "<" ++ t ++ " " ++ href url ++ ">" ++ content ++ "</" ++ t ++ ">"
 
 tagWithId :: String -> String -> String -> String
-tagWithId t str content = "<" ++ t ++ " " ++ htmlId str ++ ">" ++ content ++ "</" ++ t ++ ">"
+tagWithId t str content =
+  "<" ++ t ++ " " ++ htmlId str ++ ">" ++ content ++ "</" ++ t ++ ">"
 
 tagWithStringInside :: String -> String -> String -> String
-tagWithStringInside t str content = "<" ++ t ++ " " ++ str ++ ">" ++ content ++ "</" ++ t ++ ">"
-
--- htmlModifiers :: ADT -> String
--- htmlModifiers (Italic str) = tag "em" str
--- htmlModifiers (Bold str) = tag "strong" str
--- htmlModifiers (Strikethrough str) = tag "del" str
--- htmlModifiers (InlineCode str) = tag "code" str
--- htmlModifiers (Link (text, url)) = tagWithHref "a" url text
--- htmlModifiers (Footnote num) =
---   tag
---     "sup"
---     ( tagWithStringInside
---         "a"
---         (htmlId ("fn" ++ show num ++ "ref") ++ " " ++ href ("#fn" ++ show num))
---         (show num)
---     )
--- htmlModifiers _ = ""
-
--- htmlP :: [ADT] -> String
--- htmlP [] = ""
--- htmlP (x : xs) = case x of
---   Paragraph str -> "<p>" ++ str ++ processRest xs
---   Newline _ -> "</p>\n" ++ processRest xs
---   _ -> htmlModifiers x ++ processRest xs
---   where
---     processRest [] = ""
---     processRest (y : ys) = case y of
---       Paragraph str -> str ++ processRest ys
---       Newline _ -> "</p>\n<p>" ++ processRest ys
---       _ -> htmlModifiers y ++ processRest ys
-
--- htmlWithoutP :: [ADT] -> String
--- htmlWithoutP [] = ""
--- htmlWithoutP (x : xs) = case x of
---   JustText str -> str ++ processRest xs
---   Newline _ -> processRest xs
---   _ -> htmlModifiers x ++ processRest xs
---   where
---     processRest [] = ""
---     processRest (y : ys) = case y of
---       JustText str -> str ++ processRest ys
---       Newline _ -> processRest ys
---       _ -> htmlModifiers y ++ processRest ys
-
--- htmlHeading :: [ADT] -> String
--- htmlHeading [Heading (n, adts)] = "<h" ++ show n ++ ">" ++ htmlWithoutP adts ++ "</h" ++ show n ++ ">"
--- htmlHeading _ = ""
+tagWithStringInside t str content =
+  "<" ++ t ++ " " ++ str ++ ">" ++ content ++ "</" ++ t ++ ">"
