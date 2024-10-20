@@ -52,6 +52,7 @@ const input$: Observable<Action> = fromEvent<KeyboardEvent>(
     map((value) => (s) => ({ ...s, markdown: value, save: false })),
 );
 
+// add observanbles for title input and save button
 const titleInput$: Observable<Action> = fromEvent<KeyboardEvent>(
     titleInput,
     "input",
@@ -91,6 +92,7 @@ function getHTML(s: State): Observable<State> {
     );
 }
 
+// sends a post request to the haskell backend to save the generated html
 function saveHTML(s: State): Observable<State> {
     return ajax<{ success: string }>({
         url: "/api/saveHTML",
@@ -140,7 +142,7 @@ function main() {
                     return saveHTML(state).pipe(
                         map((savedState) => ({
                             ...savedState,
-                            save: false, // Reset the save flag after saving
+                            save: false,
                         })),
                     );
                 }

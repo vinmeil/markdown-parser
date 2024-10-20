@@ -4,7 +4,7 @@ module Main (main) where
 
 -- import Assignment (markdownParser)
 
-import Assignment (convertADTHTMLBoilerplate, getTime, markdownParser)
+import Assignment (convertADTHTMLWithBoilerplate, getTime, markdownParser)
 import Control.Monad.Cont (MonadIO (liftIO))
 import Data.Aeson (object, (.=))
 import Data.Aeson.Key (fromString)
@@ -36,7 +36,8 @@ main = scotty 3000 $ do
         newTitle = drop 1 title
         -- Parse the Markdown string using 'markdownParser' and apply 'convertAllHTML'
         -- converted_html = getResult (parse markdownParser md) convertADTHTML
-        converted_html = getResult (parse markdownParser md) (convertADTHTMLBoilerplate newTitle)
+        converted_html = getResult (parse markdownParser md)
+                                   (convertADTHTMLWithBoilerplate newTitle)
 
     -- Respond with the converted HTML as JSON
     jsonResponse [("html", converted_html)]

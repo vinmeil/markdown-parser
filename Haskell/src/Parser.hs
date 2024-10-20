@@ -11,6 +11,7 @@ import Data.Char
     isSpace,
     isUpper,
   )
+import Data.List (isPrefixOf)
 import Instances
   ( ParseError (..),
     ParseResult (..),
@@ -145,6 +146,15 @@ is = satisfy . (==)
 isNot :: Char -> Parser Char
 isNot = satisfy . (/=)
 
+-- returns a parser that produces a string but fails if the input string starts
+-- with a certain prefix
+isNotString :: String -> Parser String
+isNotString prefix = Parser f
+  where
+    f input
+      | prefix `isPrefixOf` input = Error $ UnexpectedString prefix
+      | otherwise = Result input ""
+
 -- | Write a function that parses one of the characters in the given string.
 --
 -- /Hint/: What does `elem` do? What are its parameters?
@@ -261,15 +271,15 @@ spaces1 = some space
 inlineSpace :: Parser String
 inlineSpace = many (oneof "\t\r\f\v ")
 
+-- parses at least one of the inline spaces
 inlineSpace1 :: Parser String
 inlineSpace1 = some (oneof "\t\r\f\v ")
 
-inlineSpaceWithoutSpace1 :: Parser String
-inlineSpaceWithoutSpace1 = some (oneof "\t\r\f\v\n")
-
+-- parses a string but fails if met with any of the inline spaces
 notSpace :: Parser Char
 notSpace = noneof " \t\r\f\v\n"
 
+-- parses all spaces including newlines
 allSpace :: Parser String
 allSpace = many (oneof "\t\r\f\v \n")
 
@@ -344,6 +354,19 @@ commaTok = charTok ','
 stringTok :: String -> Parser String
 stringTok = tok . string
 
+-- | Parse a sequence of at least one values with a separator.
+--
+-- >>> parse ((isTok 'a') `sepBy1` commaTok) ""
+-- Nothing
+--
+-- >>> parse ((isTok 'a') `sepBy1` commaTok) "a"
+-- Just ("","a")
+--
+-- >>> parse ((isTok 'a') `sepBy1` commaTok) "a,a"
+-- Just ("","aa")
+--
+-- >>> parse ((tok int) `sepBy1` commaTok) "1,2,3"
+-- Just ("",[1,2,3])
 sepBy1 :: Parser a -> Parser b -> Parser [a]
 sepBy1 pa pb = pa <:> some (pb *> pa)
   where
