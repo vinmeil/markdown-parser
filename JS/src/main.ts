@@ -139,10 +139,11 @@ function main() {
             }, initialState),
             switchMap((state: State) => {
                 if (state.save) {
+                    // if save button has been clicked, save the file
                     return saveHTML(state).pipe(
                         map((savedState) => ({
                             ...savedState,
-                            save: false,
+                            save: false, // set save back to false after saving
                         })),
                     );
                 }

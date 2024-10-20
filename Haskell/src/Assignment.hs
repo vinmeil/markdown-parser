@@ -12,35 +12,39 @@ import Parser
 
 -- BNF
 -- <Number>          ::= '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9'
+-- <PositiveInt>     ::= <Number> | <Number> <PositiveInt>
 -- <Char>            ::= "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z" | "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z" | "|" | " " | "!" | "#" | "$" | "%" | "&" | "(" | ")" | "*" | "+" | "," | "-" | "." | "/" | ":" | ";" | ">" | "=" | "<" | "?" | "@" | "[" | "\" | "]" | "^" | "_" | "`" | "{" | "}" | "~"
--- <Text>            ::= <Char> | <Char> <Text>
--- <JustText>        ::= <Text>
+-- <JustText>        ::= <Char> | <Char> <JustText>
+-- <Whitespace>      ::= ' ' | '\t' | '\n' | '\r' | '\f' | '\v'
 -- <Italic>          ::= '_' <TextAndModifier> '_'
 -- <Bold>            ::= '**' <TextAndModifier> '**'
 -- <Strikethrough>   ::= '~~' <TextAndModifier> '~~'
--- <Link>            ::= '[' <TextAndModifier> ']' '(' <TextAndModifier> ')'
+-- <Link>            ::= '[' <TextAndModifier> ']' '(' <JustText> ')'
 -- <InlineCode>      ::= '`' <TextAndModifier> '`'
--- <Footnote>        ::= '[^' <Number> ']'
--- <Modifiers>       ::= <Italic> | <Bold> | <Strikethrough> | <Link> | <InlineCode> | <Footnote>
--- <Image>           ::= '![' <Text> ']' '(' <URL>  '"' <Text> '"' ')'
--- <FootnoteRef>     ::= <Footnote> ':' <Text>
--- <TextAndModifier> ::= { <JustText> | <Modifiers> }
+-- <Footnote>        ::= '[^' <PositiveInt> ']'
+-- <Modifiers>       ::= <Italic> | <Bold> | <Strikethrough> |
+--                       <Link> | <InlineCode> | <Footnote>
+-- <Image>           ::= '![' <JustText> ']'
+--                       '(' <JustText> <Whitespace> '"' <JustText> '"' ')'
+-- <FootnoteRef>     ::= <Footnote> ':' <JustText>
+-- <TextAndModifier> ::= <JustText>+ | <Modifiers>+ | <JustText>+ <Modifiers>+
 -- <Paragraph>       ::= <TextAndModifier>
--- <Heading1>        ::= '#' <TextAndModifier> '\n'
--- <Heading2>        ::= '##' <TextAndModifier> '\n'
--- <Heading3>        ::= '###' <TextAndModifier> '\n'
--- <Heading4>        ::= '####' <TextAndModifier> '\n'
--- <Heading5>        ::= '#####' <TextAndModifier> '\n'
--- <Heading6>        ::= '######' <TextAndModifier> '\n'
+-- <Heading1>        ::= '#' <Whitespace> <TextAndModifier> '\n'
+-- <Heading2>        ::= '##' <Whitespace> <TextAndModifier> '\n'
+-- <Heading3>        ::= '###' <Whitespace> <TextAndModifier> '\n'
+-- <Heading4>        ::= '####' <Whitespace> <TextAndModifier> '\n'
+-- <Heading5>        ::= '#####' <Whitespace> <TextAndModifier> '\n'
+-- <Heading6>        ::= '######' <Whitespace> <TextAndModifier> '\n'
 -- <AltHeading1>     ::= <TextAndModifier> '\n' '==' {'='}
 -- <AltHeading2>     ::= <TextAndModifier> '\n' '--' {'-'}
 -- <Heading>         ::= <Heading1> | <Heading2> | <Heading3> | <Heading4> |
 --                       <Heading5> | <Heading6> | <AltHeading1> | <AltHeading2>
 -- <Blockquote>      ::= '>' <Paragraph>
--- <Code>            ::= '```' [<Text>] '\n' <Text> {'\n' <Text>} '\n```'
+-- <Code>            ::= '```' [JustText] '\n' <JustText> '\n```'
 -- <ListItem>        ::= <TextAndModifier> | <OrderedList>
 -- <OrderedList>     ::= <ListItem> | <ListItem> <OrderedList>
--- <Table>           ::= <TableRow> | <TableRow> <Table>
+-- <Table>           ::= <TableHeader> <TableRow>+
+-- <TableHeader>     ::= <TableHeaderCell>+
 -- <TableRow>        ::= <TableHeaderCell>+ | <TableRowCell>+
 -- <TableHeaderCell> ::= <TextAndModifier>
 -- <TableRowCell>    ::= <TextAndModifier>
@@ -88,7 +92,7 @@ positiveInt = do
 
 -- checks if a string starts with a certain prefix
 startsWith :: String -> Parser ()
-startsWith str = isParserSucceed (string str)
+startsWith = isParserSucceed . string
 
 -- parses a string until a certain string is found
 parseUntil :: String -> Parser String
@@ -143,7 +147,7 @@ parseAllUntil :: String -> Parser [ADT]
 parseAllUntil delim =
   some ( 
     parseModifiers <|>
-    ( isParserSucceed (isNotString delim) *> justText )
+    ( isParserSucceed (isNotString delim *> isNotString "\n") *> justText )
   )
 
 -- parses just text between 2 strings
