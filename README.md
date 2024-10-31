@@ -1,4 +1,4 @@
-# Markdown2HTML
+# Markdown To HTML Parser
 
 ## Overview
 
