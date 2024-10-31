@@ -1,10 +1,6 @@
 name: exercises
 version: 0.1.0.0
 github: "githubuser/intro"
-license: BSD3
-author: "Rhys Newbury, Lauren Yim"
-maintainer: "rhys.newbury@monash.edu"
-copyright: "2024 Rhys Newbury"
 
 # Metadata used when publishing your package
 # synopsis:            Short description of your package

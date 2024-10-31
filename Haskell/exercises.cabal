@@ -9,10 +9,6 @@ version:        0.1.0.0
 description:    Please see the README on GitHub at <https://github.com/githubuser/intro#readme>
 homepage:       https://github.com/githubuser/intro#readme
 bug-reports:    https://github.com/githubuser/intro/issues
-author:         Rhys Newbury, Lauren Yim
-maintainer:     rhys.newbury@monash.edu
-copyright:      2024 Rhys Newbury
-license:        BSD3
 build-type:     Simple
 
 source-repository head
